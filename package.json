@@ -1,0 +1,25 @@
+{
+  "name": "whatsapp-shared-inbox",
+  "private": true,
+  "type": "module",
+  "description": "WhatsApp shared inbox: Supabase backend, web test console and test harness",
+  "engines": { "node": ">=20.12" },
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "lint": "npm --prefix web run lint",
+    "typecheck": "npm --prefix web run typecheck",
+    "check:sql": "node scripts/check-sql-sync.mjs",
+    "check:functions": "deno check --no-config supabase/functions/whatsapp-webhook/index.ts supabase/functions/send-whatsapp/index.ts supabase/functions/admin-staff/index.ts && deno lint --no-config supabase/functions",
+    "test:functions": "deno test --no-config supabase/functions/tests/",
+    "test:e2e": "npm --prefix web run test:e2e",
+    "sim:all": "node scripts/run-all.mjs",
+    "sim:verify": "node scripts/verify-webhook.mjs",
+    "sim:bad-signature": "node scripts/simulate-bad-signature.mjs",
+    "sim:duplicate": "node scripts/simulate-duplicate.mjs",
+    "sim:text": "node scripts/simulate-incoming.mjs text",
+    "sim:image": "node scripts/simulate-incoming.mjs image",
+    "sim:document": "node scripts/simulate-incoming.mjs document",
+    "sim:status": "node scripts/simulate-incoming.mjs status"
+  }
+}
