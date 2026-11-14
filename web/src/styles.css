@@ -1033,3 +1033,7 @@ textarea:disabled {
   min-height: 34px;
   padding: 5px 10px;
 }
+
+.owner .owner-tag {
+  align-self: center;
+}
