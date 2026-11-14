@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { isConfigured, supabase } from "./lib/supabase";
+import "./lib/settings"; // applies the saved theme before the first paint
 import { clearFileUrlCache } from "./lib/api";
 import { useProfile, useSession } from "./hooks/useAuth";
 import { LoginPage } from "./components/LoginPage";

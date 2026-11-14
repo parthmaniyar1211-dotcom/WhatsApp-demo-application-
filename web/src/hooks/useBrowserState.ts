@@ -29,15 +29,20 @@ function subscribeHash(callback: () => void) {
   return () => window.removeEventListener("hashchange", callback);
 }
 
-export type Route = { page: "inbox"; conversationId: string | null } | { page: "admin" };
+export type Route =
+  | { page: "inbox"; conversationId: string | null; messageId: string | null }
+  | { page: "admin" };
 
 function parseRoute(hash: string): Route {
   if (hash === "#/admin") return { page: "admin" };
-  const match = /^#\/c\/([0-9a-f-]{36})$/i.exec(hash);
-  return { page: "inbox", conversationId: match ? match[1] : null };
+  const match = /^#\/c\/([0-9a-f-]{36})(?:\/m\/([0-9a-f-]{36}))?$/i.exec(hash);
+  return { page: "inbox", conversationId: match ? match[1] : null, messageId: match?.[2] ?? null };
 }
 
-/** Minimal hash routing, so the phone's back button closes a chat: #/c/<id>, #/admin. */
+/**
+ * Minimal hash routing, so the phone's back button closes a chat:
+ * #/c/<conversation id>, #/c/<conversation id>/m/<message id> (jump to a message), #/admin.
+ */
 export function useRoute(): Route {
   const hash = useSyncExternalStore(subscribeHash, () => window.location.hash);
   return parseRoute(hash);

@@ -6,7 +6,7 @@ loadEnv();
 
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 90_000,
+  timeout: 120_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
   workers: 1,
@@ -16,6 +16,9 @@ export default defineConfig({
     baseURL: "http://localhost:5173",
     trace: "off",
     screenshot: "only-on-failure",
+    // Voice-note test: a fake microphone that needs no permission prompt.
+    permissions: ["microphone"],
+    launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] },
   },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },

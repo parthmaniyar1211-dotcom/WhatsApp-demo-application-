@@ -1,4 +1,4 @@
-import type { Conversation } from "./types";
+import type { Conversation, Message } from "./types";
 
 export const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -6,8 +6,9 @@ export function customerLabel(c: Pick<Conversation, "customer_name" | "wa_id">):
   return c.customer_name?.trim() || formatPhone(c.wa_id);
 }
 
+/** "+9198…" for phone numbers. WhatsApp can hide the number of customers who use a username. */
 export function formatPhone(waId: string): string {
-  return `+${waId}`;
+  return /^\d+$/.test(waId) ? `+${waId}` : "Number hidden by WhatsApp";
 }
 
 function sameDay(a: Date, b: Date): boolean {
@@ -53,6 +54,42 @@ export function formatRemaining(lastInboundAt: string, now: number): string {
   const minutes = Math.max(0, Math.floor(ms / 60000));
   if (minutes >= 60) return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
   return `${minutes} min`;
+}
+
+export function formatBytes(bytes: number | null): string {
+  if (bytes === null || bytes === undefined) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+export function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** One line that describes a message: used in quotes, search results and notifications. */
+export function messageSummary(m: Pick<Message, "type" | "body" | "media_filename" | "media_voice">): string {
+  switch (m.type) {
+    case "image":
+      return m.body ? `Photo: ${m.body}` : "Photo";
+    case "video":
+      return m.body ? `Video: ${m.body}` : "Video";
+    case "audio":
+      return m.media_voice ? "Voice message" : "Audio";
+    case "sticker":
+      return "Sticker";
+    case "document":
+      return m.media_filename ?? "Document";
+    case "location":
+      return m.body ? `Location: ${m.body}` : "Location";
+    case "contacts":
+      return m.body ? `Contact: ${m.body}` : "Contact";
+    case "template":
+      return `Template: ${m.body ?? ""}`;
+    default:
+      return m.body ?? "";
+  }
 }
 
 export function errorMessage(err: unknown): string {

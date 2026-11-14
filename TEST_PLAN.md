@@ -1,6 +1,7 @@
 # Test plan
 
 Do the three stages in order. Each stage adds one real component.
+Stages 1 and 2 need no phone. Stage 3 (your phone) is in [REAL_TEST_PLAN.md](REAL_TEST_PLAN.md).
 
 | Stage | WhatsApp needed | `WA_DRY_RUN` on the server |
 | --- | --- | --- |
@@ -50,6 +51,8 @@ The individual steps, if you want to run them one at a time:
 | Bad signature | `npm run sim:bad-signature` | four lines `-> HTTP 401` |
 | Text | `npm run sim:text -- "Hello"` | `PASS  text accepted` |
 | Image | `npm run sim:image -- "A caption"` | `PASS  image accepted` |
+| Voice note, video, sticker | `npm run sim -- audio` / `video "caption"` / `sticker` | `PASS  ... accepted` |
+| Location, contact | `npm run sim -- location "Office"` / `contacts "Ravi"` | `PASS  ... accepted` |
 | Document | `npm run sim:document -- "invoice.pdf"` | `PASS  document accepted` |
 | Duplicate | `npm run sim:duplicate` | `second delivery recognised as duplicate` and `exactly one row in wa_messages` |
 
@@ -58,8 +61,10 @@ The individual steps, if you want to run them one at a time:
 - **Pass:**
   - A conversation **Test Customer** appeared by itself, at the top of the list, with a green unread badge.
   - The header shows a green dot and **Live**.
-  - Open it: you see the text messages, a green checkered test photo, and a `invoice.pdf` /
-    `test-document.pdf` row with a **Download** link that opens a small PDF.
+  - Open it: you see the text messages, a green checkered test photo, a `test-document.pdf` card
+    ("PDF · 598 B") with a **Download** link, a voice message and a video you can play, a green sticker,
+    a location card with "Open in Google Maps" and a contact card.
+  - Above the first new message there is a line "N unread messages".
   - The unread badge disappears after opening.
 - **Fail:**
   - Nothing appears until you reload → Realtime is not working. Check that `whatsapp_setup.sql` ran without
@@ -86,8 +91,9 @@ cd web && npx playwright install chromium && cd ..
 npm run test:e2e
 ```
 
-- **Pass:** `12 passed` (6 tests at desktop width, 6 at phone width). Without `E2E_ADMIN_ID` /
-  `E2E_ADMIN_PASSWORD` the two admin tests are skipped: `8 passed, 4 skipped`.
+- **Pass:** `40 passed` (20 tests at desktop width, 20 at phone width). Without `E2E_ADMIN_ID` /
+  `E2E_ADMIN_PASSWORD` the two admin tests are skipped: `36 passed, 4 skipped`.
+- The voice-note test needs `ffprobe` only for an extra check; without it the test still runs.
 - **Skipped with "End-to-end test skipped: it needs a real Supabase project. Missing: ..."** → fill in the
   values it lists.
 
@@ -102,7 +108,7 @@ Nothing is sent to Meta. The server does everything else: login check, 24-hour r
 Open **Test Customer**, type `Test reply`, press **Send**.
 
 - **Pass:** a green bubble on the right with your text, your staff ID (for example `EMP1001`) at the bottom
-  left and the status **Sent**. The text box is empty again.
+  left and **one grey tick** (hover it: "Sent"). The text box is empty again.
 - **Fail:**
   - Red box "WhatsApp is not configured on the server" → `WA_DRY_RUN` is not `true`.
   - Red box "Not signed in" / "not allowed" → the login is disabled or has no `staff` row.
@@ -117,7 +123,7 @@ npm run sim:status -- wamid.DRYRUN.xxxxxxxx delivered
 npm run sim:status -- wamid.DRYRUN.xxxxxxxx read
 ```
 
-- **Pass:** the bubble changes to **Delivered**, then to a blue **Read**, without a reload.
+- **Pass:** the tick changes to **two grey ticks** (delivered), then to **two blue ticks** (read), without a reload.
 - **Fail:** `ignored the event` → the id is wrong, or the message is already further along
   (a message never goes back from Read to Delivered).
 
@@ -129,16 +135,18 @@ Send another reply, copy its id, then:
 npm run sim:status -- wamid.DRYRUN.yyyyyyyy failed
 ```
 
-- **Pass:** the bubble turns red, status **Failed**, with "Not delivered: 131026: Simulated failure from the test harness".
+- **Pass:** the bubble turns red with a red mark instead of ticks, and the text
+  "Not delivered: Message could not be delivered. The number may not be on WhatsApp, … (code 131026)".
 
 ### 2.4 Photo and PDF
 
-1. Press the paperclip, choose a JPEG or PNG under 10 MB, add a caption, **Send**.
+1. Press the paperclip, choose a JPEG or PNG under 5 MB, add a caption, **Send**.
 2. Press the paperclip, choose a PDF under 10 MB, **Send**.
-3. Try a file over 10 MB, and a `.txt` file.
+3. Try a photo over 5 MB, a PDF over 10 MB, and a `.txt` file.
 
-- **Pass:** (1) a bubble with the photo, (2) a bubble with the PDF name and **Download**, (3) a red message
-  "This file is larger than 10 MB." / "Only JPEG or PNG photos and PDF files can be sent." and nothing is sent.
+- **Pass:** (1) a bubble with the photo, (2) a card with the PDF name, size and **Download**, (3) a red message
+  "Photos can be at most 5 MB." / "PDF files can be at most 10 MB." /
+  "Only JPEG or PNG photos, PDF files, MP4 videos and audio files can be sent." and nothing is sent.
 
 ### 2.5 The 24-hour rule
 
@@ -171,12 +179,12 @@ Still with two staff members signed in, send `npm run sim:text -- "Who reads thi
 
 ### 2.8 Admin
 
-Sign in as `ADMIN1`, open **Admin**.
+Sign in as `ADMIN1`, click the gear at the top right, choose **Admin: staff accounts**.
 
 | Action | Pass |
 | --- | --- |
 | Create `EMP1002` with a password | green "Created EMP1002"; that person can sign in |
-| Sign in as `EMP1002` | there is no **Admin** button |
+| Sign in as `EMP1002` | the gear menu has no **Admin** entry |
 | **Reset password** for `EMP1002` | the old password stops working, the new one works |
 | **Disable** `EMP1002` | their open app stops showing data after a reload ("Account not active"); signing in again is refused |
 | **Enable** | they can sign in again |
@@ -190,84 +198,41 @@ Sign in as `ADMIN1`, open **Admin**.
 
 ---
 
+### 2.10 WhatsApp-like features
+
+Use the **Test Customer** chat. `<id>` is the `wa_message_id` of one of your replies
+(Supabase → Table Editor → `wa_messages`, it starts with `wamid.DRYRUN.`).
+
+| What | Do this | Pass |
+| --- | --- | --- |
+| Read at WhatsApp | open a chat with unread messages | `conversations.meta_read_wa_message_id` is filled in (Table Editor). With real WhatsApp the customer sees blue ticks. |
+| Reply with quote | hover a customer message → small arrow → **Reply** → type → Send | your bubble shows the quoted text in a grey box |
+| Customer quotes you | `npm run sim -- text "This one" --reply-to <id>` | the new bubble shows a quote of your reply with your staff ID |
+| Reaction from the customer | `npm run sim -- reaction <id> 👍`, then `npm run sim -- reaction <id>` | 👍 appears under your bubble, then disappears |
+| Your reaction | message menu → pick an emoji; click the emoji chip | the emoji appears under the customer's bubble; a click removes it |
+| Voice note | microphone button → allow the microphone → speak → **Done** → **Send** | a "Voice message" bubble with a player that plays your recording |
+| Played | `npm run sim -- status <id of the voice note> played` | the ticks are blue; hover says "Played" |
+| Photo preview | click a photo | it opens large; Escape or **Close** closes it |
+| Long chat | run `npm run sim:text -- "Line"` many times, or use the Playwright test | older messages load by themselves when you scroll up; a round arrow button brings you back down and counts new messages |
+| Search in a chat | magnifier in the chat header → type a word | matching messages are listed; a click jumps to the message and highlights it |
+| Search everywhere | type a word in the sidebar search | a "Messages" section lists matches from all chats |
+| Star | message menu → **Star** | a small star on the bubble; the message is listed under the **Starred** tab |
+| Hide for me | message menu → **Hide for me** | the message disappears for you only; the notice says the customer and colleagues still see it; **Undo** brings it back |
+| Quick replies | type `/he` in the reply box, press Enter | the saved text is inserted (not sent). Gear → **Quick replies…** lets you add, change and delete them |
+| Customer details | ⓘ in the chat header | name, number, owner, labels, notes. Add a label: it appears in the chat list. Save a note: it is still there after a reload |
+| API limits | ⓘ → scroll down | a list of what WhatsApp does not allow (online status, editing/deleting, Status, calls) |
+| Notification and sound | gear → switch on **Browser notifications**, allow it; open another chat; `npm run sim:text -- "Ping" --from 919800000009` | a sound and a browser notification with the customer's name |
+| Emoji | smiley button → pick one | it is inserted where the cursor is |
+| Paste / drop | copy a screenshot and press Ctrl+V in the reply box; drag a PDF onto the chat | the file is attached, ready to send |
+| Dark mode | gear → Theme → **Dark** | the whole app is dark and stays dark after a reload |
+
+---
+
 ## Stage 3: real test with your phone
 
-Finish README.md step 8 first (webhook URL, verify token, `messages` field, your number in the "To" list).
-
-Switch dry run off:
-
-```bash
-supabase secrets set WA_DRY_RUN=false
-```
-
-`WA_TOKEN` from the API Setup page expires after about 24 hours. If replies fail with a token error,
-copy a new token and run `supabase secrets set WA_TOKEN=...` again.
-
-### 3.1 Phone → inbox (text)
-
-From your phone, send `hi` in WhatsApp to the Meta test number.
-
-- **Pass:** within a few seconds a conversation with your WhatsApp name and number appears in the web inbox,
-  with "hi" and an unread badge. No reload.
-- **Fail:**
-  - Nothing arrives. In **Supabase → Edge Functions → whatsapp-webhook → Logs**:
-    - no request at all → the webhook URL in Meta is wrong, or the `messages` field is not subscribed
-    - `401` → `WA_APP_SECRET` is not the App secret of this Meta app
-    - `ignored=1` → `WA_PHONE_ID` is not the Phone number ID of the test number
-
-### 3.2 Inbox → phone (text)
-
-Open the conversation, type `Hello from the web inbox`, **Send**.
-
-- **Pass:** the message arrives on your phone. The bubble shows **Sent**, then **Delivered**, then a blue
-  **Read** when you open WhatsApp on the phone.
-- **Fail:** a red bubble with the reason from WhatsApp. Common reasons:
-
-| Reason | Fix |
-| --- | --- |
-| `131030 ... not in allowed list` | add your number to the "To" list of the test number |
-| `190 ...` / `Error validating access token` | `WA_TOKEN` expired; set a new one |
-| `131047` / "24-hour window is closed" | send a new message from the phone first |
-| `WhatsApp is not configured on the server` | `WA_TOKEN` or `WA_PHONE_ID` is not set |
-
-### 3.3 Photo, phone → inbox
-
-Send a photo with a caption from your phone.
-
-- **Pass:** the photo and caption appear in the conversation. Clicking the photo opens it.
-- **Fail:** "File could not be downloaded" → `WA_TOKEN` is missing or expired. "larger than 10 MB" is expected for big files.
-
-### 3.4 PDF, phone → inbox
-
-Send a PDF from your phone.
-
-- **Pass:** a row with the file name and **Download**; the PDF opens.
-- Other file types (Word, zip, audio, video) show "File type not supported" / "Unsupported message type". That is expected.
-
-### 3.5 Photo, inbox → phone
-
-Attach a JPEG or PNG, add a caption, **Send**.
-
-- **Pass:** the photo with caption arrives on your phone; the status moves to **Delivered**.
-
-### 3.6 PDF, inbox → phone
-
-Attach a PDF, **Send**.
-
-- **Pass:** the PDF arrives on your phone with its file name and opens.
-- **Fail:** status **Failed** with a media download reason → tell me the reason text shown in the bubble.
-
-### 3.7 Template outside the window (optional)
-
-Wait 24 hours without writing from the phone (or test with a number that never wrote), open the
-conversation, press **Send template**.
-
-- **Pass:** the "Hello World" template arrives on the phone.
-
-### 3.8 Duplicate protection (real)
-
-Nothing to do: Meta sometimes delivers the same event twice. **Pass:** you never see the same incoming
-message twice in a conversation.
+Follow [REAL_TEST_PLAN.md](REAL_TEST_PLAN.md). It starts with `npm run real-check` and then goes through
+every case with exact phone steps: text, photo, PDF and voice note both ways, location, reaction,
+quoted reply, read ticks, a failed send, and the closed window with the template.
 
 ---
 

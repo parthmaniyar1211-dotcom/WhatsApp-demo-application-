@@ -14,8 +14,10 @@ import {
   login,
   missingForE2E,
   newCustomer,
+  signOut,
   simulateIncoming,
   simulateStatus,
+  statusOf,
 } from "./helpers";
 
 const fixture = (name: string) => fileURLToPath(new URL(`../../scripts/fixtures/${name}`, import.meta.url));
@@ -47,11 +49,11 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
   await page.screenshot({ path: testInfo.outputPath("1-inbox.png") });
 
   // Search by number and by name.
-  const search = page.getByLabel("Search conversations by name or number");
+  const search = page.getByLabel("Search chats and messages");
   await search.fill(customer.from.slice(-8));
   await expect(page.getByTestId("conversation-item")).toHaveCount(1);
   await search.fill("zzz-no-such-customer");
-  await expect(page.getByText("No conversation matches")).toBeVisible();
+  await expect(page.getByText("No chat or message matches")).toBeVisible();
   await search.fill(customer.name.toLowerCase());
   await expect(item).toBeVisible();
   await search.fill("");
@@ -70,7 +72,7 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
   const reply = page.getByTestId("message-out").filter({ hasText: "Yes, it is ready for pickup." });
   await expect(reply).toHaveCount(1);
   await expect(reply).toContainText(env.staffId.toUpperCase());
-  await expect(reply.getByTestId("message-status")).toHaveText(/Sent|Delivered|Read/);
+  await expect(statusOf(reply)).toHaveAttribute("data-status", /sent|delivered|read/);
   await expect(page.getByTestId("reply-input")).toHaveValue("");
 
   // 4. WhatsApp reports "delivered", then "read": the bubble follows live.
@@ -78,9 +80,10 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
   expect(sent.wa_message_id).toBeTruthy();
   const dryRun = sent.wa_message_id!.startsWith("wamid.DRYRUN.");
   await simulateStatus(customer.from, sent.wa_message_id!, "delivered");
-  await expect(reply.getByTestId("message-status")).toHaveText("Delivered");
+  await expect(statusOf(reply)).toHaveAttribute("data-status", "delivered");
+  await expect(statusOf(reply)).toHaveAttribute("aria-label", "Delivered");
   await simulateStatus(customer.from, sent.wa_message_id!, "read");
-  await expect(reply.getByTestId("message-status")).toHaveText("Read");
+  await expect(statusOf(reply)).toHaveAttribute("data-status", "read");
   // A late "delivered" must not move the message backwards.
   const config = await import("../../scripts/lib/meta.mjs");
   const late = await config.postWebhook(
@@ -94,7 +97,7 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
     config.harnessConfig().appSecret,
   );
   expect(late.json?.statuses).toBe(0);
-  await expect(reply.getByTestId("message-status")).toHaveText("Read");
+  await expect(statusOf(reply)).toHaveAttribute("data-status", "read");
 
   // 5. Take the chat: the owner is shown in the header (and in the list on desktop).
   await page.getByRole("button", { name: "Take chat" }).click();
@@ -111,6 +114,7 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
     await simulateIncoming(customer, { kind: "document", filename: "invoice-123.pdf" });
     const pdf = page.getByTestId("message-in").getByTestId("message-document");
     await expect(pdf).toContainText("invoice-123.pdf");
+    await expect(pdf.getByTestId("document-details")).toHaveText("PDF · 598 B");
     await expect(pdf).toHaveAttribute("href", /\/storage\/v1\/object\/sign\/files\/incoming\/.+token=/);
 
     await page.getByTestId("file-input").setInputFiles(fixture("sample.png"));
@@ -132,7 +136,7 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
     mimeType: "text/plain",
     buffer: Buffer.from("not allowed"),
   });
-  await expect(page.getByTestId("composer-error")).toContainText("Only JPEG or PNG photos and PDF files");
+  await expect(page.getByTestId("composer-error")).toContainText("Only JPEG or PNG photos, PDF files");
   await page.screenshot({ path: testInfo.outputPath("2-conversation.png") });
 
   // 7. The session survives a reload.
@@ -146,8 +150,7 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
     await page.getByRole("link", { name: "Back to inbox" }).click();
     await expect(conversationItem(page, customer.from)).toBeVisible();
   }
-  await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  await signOut(page);
 });
 
 test("closed 24-hour window: free text is disabled and the template sender is shown", async ({ page }, testInfo) => {
@@ -166,14 +169,14 @@ test("closed 24-hour window: free text is disabled and the template sender is sh
   await page.getByTestId("send-template").click();
   const template = page.getByTestId("message-out").filter({ hasText: "hello_world" });
   await expect(template).toHaveCount(1);
-  await expect(template.getByTestId("message-status")).toHaveText(/Sent|Delivered|Read|Failed/);
+  await expect(statusOf(template)).toHaveAttribute("data-status", /sent|delivered|read|failed/);
 
   // WhatsApp later reports that delivery failed: the bubble shows the reason.
   const sent = await latestOutgoing(customer.from);
   if (sent.wa_message_id && sent.status === "sent") {
     await simulateStatus(customer.from, sent.wa_message_id, "failed");
-    await expect(template.getByTestId("message-status")).toHaveText("Failed");
-    await expect(template.getByTestId("message-error")).toContainText("Not delivered: 131026");
+    await expect(statusOf(template)).toHaveAttribute("data-status", "failed");
+    await expect(template.getByTestId("message-error")).toContainText("Message could not be delivered");
   }
 
   // When the customer answers, the window opens again without a reload.

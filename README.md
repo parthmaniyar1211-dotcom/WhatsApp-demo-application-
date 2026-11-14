@@ -1,7 +1,9 @@
 # WhatsApp shared inbox
 
 Customers message the business WhatsApp number. The message appears in a shared web inbox in real time.
-Staff reply from the web app and the customer receives the reply in WhatsApp. Photos and PDFs work both ways.
+Staff reply from the web app and the customer receives the reply in WhatsApp. Photos, PDFs, videos and
+voice notes work both ways, with ticks, quoted replies, reactions and the other things staff know from WhatsApp
+(as far as the official Cloud API allows).
 
 This repository holds the **Supabase backend** (database, storage, Edge Functions), a **web test console**
 and a **test harness** that simulates WhatsApp without a phone. The future Android APK uses the same backend,
@@ -12,12 +14,15 @@ whatsapp_setup.sql                 full schema (paste into the Supabase SQL edit
 supabase/migrations/               the same schema as a migration (for `supabase db push`)
 supabase/functions/
   whatsapp-webhook/                receives messages + delivery statuses from Meta (no JWT, HMAC signature)
-  send-whatsapp/                   staff replies (JWT, 24-hour rule, rate limit, WA_DRY_RUN)
+  send-whatsapp/                   staff replies, quotes, reactions (JWT, 24-hour rule, rate limit, WA_DRY_RUN)
+  mark-read/                       blue ticks for the customer + "typing…" (JWT)
   admin-staff/                     create / disable / reset staff logins (admin JWT, service role inside)
-  tests/                           Deno tests for all three functions
+  tests/                           Deno tests for all functions
 scripts/                           test harness: simulate incoming messages, duplicates, bad signatures
+scripts/real-check.mjs             live smoke test with your real credentials (sends nothing)
 web/                               Vite + React + TypeScript web console (anon key only)
-TEST_PLAN.md                       step-by-step manual test
+TEST_PLAN.md                       step-by-step test without a phone (simulated + dry run)
+REAL_TEST_PLAN.md                  step-by-step test with your phone
 DECISIONS.md                       design decisions and bugs fixed
 ```
 
@@ -86,15 +91,25 @@ supabase secrets set --env-file ~/wa-secrets.env
 ```
 
 To change one value later: `supabase secrets set WA_DRY_RUN=false`.
-Optional: `WA_GRAPH_VERSION` (default `v24.0`).
+
+Optional secrets:
+
+| Secret | Default | Meaning |
+| --- | --- | --- |
+| `WA_GRAPH_VERSION` | `v26.0` | Graph API version (v26.0 is the current one, released 2026-07-29) |
+| `WA_MEDIA_MODE` | `link` | `link`: Meta fetches files from a 10-minute signed URL. `upload`: files are uploaded to Meta first and sent by media id. Switch to `upload` if Meta reports media errors 131052 / 131053. |
 
 ### 5. Deploy the functions
 
 ```bash
 supabase functions deploy whatsapp-webhook --no-verify-jwt
 supabase functions deploy send-whatsapp
+supabase functions deploy mark-read
 supabase functions deploy admin-staff
 ```
+
+Updating an existing project: run `supabase db push` (or paste `whatsapp_setup.sql` again, it is safe to
+re-run) **before** deploying the functions, because the new functions use the new SQL functions.
 
 The webhook URL is `https://YOUR_PROJECT_REF.supabase.co/functions/v1/whatsapp-webhook`.
 
@@ -129,7 +144,10 @@ Fill in `WA_APP_SECRET`, `WA_VERIFY_TOKEN`, `WA_PHONE_ID` (same values as the Su
 
 ### 9. Test
 
-Follow [TEST_PLAN.md](TEST_PLAN.md).
+1. [TEST_PLAN.md](TEST_PLAN.md): everything without a phone (simulated messages, dry run).
+2. `npm run real-check`: checks the deployed webhook and your real token. It reads `~/wa-secrets.env`
+   (the same file you used for `supabase secrets set`), sends no message and never prints a secret.
+3. [REAL_TEST_PLAN.md](REAL_TEST_PLAN.md): the test with your phone.
 
 ## Commands
 
@@ -144,8 +162,11 @@ Run from the repository root.
 | `npm run test:functions` | Deno tests for the Edge Functions (no network needed) |
 | `npm run check:sql` | checks `whatsapp_setup.sql` equals the migration |
 | `npm run sim:all` | the whole simulated webhook test |
-| `npm run sim:text -- "Hello"` | one simulated text message (also `sim:image`, `sim:document`) |
-| `npm run sim:status -- <wa_message_id> delivered` | a simulated delivery status |
+| `npm run sim -- text "Hello"` | one simulated message: `text`, `image`, `video`, `document`, `audio`, `sticker`, `location`, `contacts` |
+| `npm run sim -- text "Yes" --reply-to <wa_message_id>` | the customer quotes a message |
+| `npm run sim -- reaction <wa_message_id> 👍` | the customer reacts (no emoji = removes the reaction) |
+| `npm run sim -- status <wa_message_id> delivered` | a delivery status: `sent`, `delivered`, `read`, `played`, `failed` |
+| `npm run real-check` | live check of the deployed webhook and your real token (needs `~/wa-secrets.env`) |
 | `npm run test:e2e` | Playwright test against your Supabase project (first time: `cd web && npx playwright install chromium`) |
 
 ## Hosting the web app (optional)
@@ -176,17 +197,57 @@ supabase status                                              # shows the local A
 Use `WA_APP_SECRET=local-app-secret`, `WA_VERIFY_TOKEN=local-verify-token`, `WA_PHONE_ID=LOCAL_PHONE_ID`
 in the root `.env`, then run `npm run sim:all` and `npm run test:e2e`.
 
+## What the web app does
+
+| Feature | Notes |
+| --- | --- |
+| Ticks | clock (sending), one grey (sent), two grey (delivered), two blue (read, or played for voice notes), red mark (failed, with the reason) |
+| Blue ticks for the customer | opening a chat marks the customer's messages as read at WhatsApp |
+| Typing indicator | the customer sees "typing…" while staff write (WhatsApp shows it for at most 25 s) |
+| Reply with quote, reactions | both directions, from the small arrow at the top right of a message |
+| Voice notes | record with the microphone button; sent as OGG/Opus so WhatsApp shows a real voice note |
+| Photos, videos, stickers, documents, locations, contacts | preview, player, file card with name and size, map link |
+| Long chats | date separators, grouped messages, unread divider, endless scrolling, "scroll to latest" button |
+| Search | in the sidebar: chats (name, number, label) and message text in all chats; in a chat: the magnifier |
+| Starred / Hide for me | private to each staff member. Hiding never deletes anything for the customer |
+| Quick replies | type `/` in the reply box; manage them under Settings (gear) → Quick replies |
+| Customer details | the ⓘ button: name, number, owner, labels, internal notes, starred and hidden messages |
+| Notifications, sound, dark mode | Settings (gear), remembered per browser |
+| Emoji, paste, drag and drop | emoji button; Ctrl+V a screenshot; drop a file on the chat |
+
+Not possible with the official WhatsApp Business API, and therefore not in the app: the customer's online /
+last-seen status, Status/Stories, editing or deleting a sent message for the customer, and calls.
+The customer details panel and the message menu say so.
+
 ## Backend contract (for the APK)
 
 The APK uses the same anon key and a staff login (`emp1001@company.demo` + password).
 
-- **Read** (RLS: active staff only): `conversations`, `wa_messages`, `staff`, `conversation_reads`.
+- **Read** (RLS: active staff only): `conversations`, `wa_messages`, `staff`, `conversation_reads`,
+  `quick_replies`, and the caller's own `message_flags`.
 - **Realtime**: `postgres_changes` on `conversations` and `wa_messages`. Reload the data every time the
   channel reports the database subscription is active (see `web/src/hooks/useLiveChannel.ts`).
+  Reactions, statuses, labels and notes arrive as updates of those rows.
 - **RPC**: `unread_counts()`, `mark_conversation_read(p_conversation_id)`,
-  `take_conversation(p_conversation_id)`, `release_conversation(p_conversation_id)`.
-- **Send**: upload the file (if any) to bucket `files` at `outgoing/<user id>/<name>.jpg|png|pdf`, then
-  `POST /functions/v1/send-whatsapp` with `{ conversation_id, text?, media_path?, filename?, template? }`.
-  Errors are `{ error, code }` with HTTP 400 / 401 / 403 / 404 / 409 (`window_closed`) / 413 / 429 / 502.
+  `take_conversation(p_conversation_id)`, `release_conversation(p_conversation_id)`,
+  `set_message_flags(p_message_id, p_starred, p_hidden)`, `save_quick_reply(p_id, p_shortcut, p_body)`,
+  `delete_quick_reply(p_id)`, `update_conversation_info(p_conversation_id, p_notes, p_labels)`,
+  `search_messages(p_query, p_conversation_id, p_limit)`.
+- **Send**: upload the file (if any) to bucket `files` at `outgoing/<user id>/<name>` as **raw bytes with
+  the Content-Type header** (not multipart), then `POST /functions/v1/send-whatsapp` with one of:
+  - `{ conversation_id, text, reply_to? }`
+  - `{ conversation_id, media_path, text?, filename?, voice?, reply_to? }`
+    (JPEG/PNG ≤ 5 MB, PDF / MP4 / audio ≤ 10 MB; voice notes must be OGG/Opus mono uploaded as
+    `audio/ogg; codecs=opus`)
+  - `{ conversation_id, template: "hello_world" }`
+  - `{ conversation_id, reaction: { message_id, emoji } }` (`emoji: ""` removes it)
+
+  `reply_to` and `reaction.message_id` are `wa_messages.id` values. Errors are `{ error, code }` with HTTP
+  400 / 401 / 403 / 404 / 409 (`window_closed`) / 413 / 429 / 502.
+- **Read receipts / typing**: `POST /functions/v1/mark-read` with `{ conversation_id, typing? }` when the
+  user opens a chat, when a new message arrives in the open chat, and (with `typing: true`, at most every
+  20 s) while the user types.
 - **Files**: the bucket is private. Ask for a signed URL when showing a file.
 - **Admin**: `POST /functions/v1/admin-staff` with `action` = `create` / `set_disabled` / `reset_password`.
+- **Customers without a phone number**: since 2026 Meta can hide the number of customers who use a
+  username. `conversations.wa_id` is then Meta's user id (not digits); show "number hidden".

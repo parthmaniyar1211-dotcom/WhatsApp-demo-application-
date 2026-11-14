@@ -1,10 +1,10 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import type { Message } from "../lib/types";
 import { errorMessage } from "../lib/format";
 import { type Change, type LiveStatus, useLiveChannel } from "./useLiveChannel";
 
-const PAGE_SIZE = 100;
+export const PAGE_SIZE = 50;
 
 function mergeMessages(current: Message[], incoming: Message[]): Message[] {
   const byId = new Map(current.map((m) => [m.id, m]));
@@ -31,10 +31,12 @@ export interface MessageStream {
   reload: () => void;
   /** Adds or replaces a message right away (used for the reply returned by send-whatsapp). */
   upsert: (message: Message) => void;
+  /** Makes sure an older message is loaded (with everything after it). False when it does not exist. */
+  ensureLoaded: (messageId: string) => Promise<boolean>;
 }
 
 /**
- * The live message stream of one conversation.
+ * The live message stream of one conversation, newest page first, older pages on demand.
  * Render the component that uses this with key={conversationId} so state resets between chats.
  */
 export function useMessages(conversationId: string): MessageStream {
@@ -45,6 +47,11 @@ export function useMessages(conversationId: string): MessageStream {
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const pending = useRef<{ loads: number; changes: Change[] }>({ loads: 0, changes: [] });
   const firstLoad = useRef(true);
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  });
+  const busyEarlier = useRef(false);
 
   const reload = useCallback(async () => {
     pending.current.loads++;
@@ -89,9 +96,10 @@ export function useMessages(conversationId: string): MessageStream {
     reload,
   );
 
-  const oldest = messages[0]?.created_at;
   const loadEarlier = useCallback(async () => {
-    if (!oldest) return;
+    const oldest = messagesRef.current[0]?.created_at;
+    if (!oldest || busyEarlier.current) return;
+    busyEarlier.current = true;
     setLoadingEarlier(true);
     const { data, error: queryError } = await supabase
       .from("wa_messages")
@@ -100,6 +108,7 @@ export function useMessages(conversationId: string): MessageStream {
       .lt("created_at", oldest)
       .order("created_at", { ascending: false })
       .limit(PAGE_SIZE);
+    busyEarlier.current = false;
     setLoadingEarlier(false);
     if (queryError) {
       setError(errorMessage(queryError));
@@ -108,11 +117,40 @@ export function useMessages(conversationId: string): MessageStream {
     const earlier = (data ?? []) as Message[];
     setHasEarlier(earlier.length === PAGE_SIZE);
     setMessages((current) => mergeMessages(current, earlier));
-  }, [conversationId, oldest]);
+  }, [conversationId]);
 
   const upsert = useCallback((message: Message) => {
     setMessages((current) => mergeMessages(current, [message]));
   }, []);
 
-  return { messages, loaded, error, live, hasEarlier, loadingEarlier, loadEarlier, reload, upsert };
+  const ensureLoaded = useCallback(
+    async (messageId: string) => {
+      if (messagesRef.current.some((m) => m.id === messageId)) return true;
+      const target = await supabase
+        .from("wa_messages")
+        .select("*")
+        .eq("id", messageId)
+        .eq("conversation_id", conversationId)
+        .maybeSingle();
+      if (target.error || !target.data) return false;
+      // Load everything from that message up to what is already shown, so the list has no gap.
+      const oldest = messagesRef.current[0]?.created_at;
+      let query = supabase
+        .from("wa_messages")
+        .select("*")
+        .eq("conversation_id", conversationId)
+        .gte("created_at", (target.data as Message).created_at)
+        .order("created_at", { ascending: true })
+        .limit(1000);
+      if (oldest) query = query.lt("created_at", oldest);
+      const between = await query;
+      if (between.error) return false;
+      setMessages((current) => mergeMessages(current, [target.data as Message, ...((between.data ?? []) as Message[])]));
+      setHasEarlier(true);
+      return true;
+    },
+    [conversationId],
+  );
+
+  return { messages, loaded, error, live, hasEarlier, loadingEarlier, loadEarlier, reload, upsert, ensureLoaded };
 }

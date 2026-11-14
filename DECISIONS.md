@@ -19,7 +19,7 @@ Everything else ran against a **real local Supabase stack** (`supabase start`: P
 PostgREST, Realtime, Storage and the Edge Runtime in Docker) with `WA_DRY_RUN=true`:
 
 - the migration applied cleanly, and applied cleanly a second time;
-- the three functions ran in the real Edge Runtime;
+- all functions ran in the real Edge Runtime;
 - the harness scripts ran against the real webhook;
 - the Playwright tests drove the real web app against that stack at desktop and phone width.
 
@@ -48,7 +48,7 @@ PostgREST, Realtime, Storage and the Edge Runtime in Docker) with `WA_DRY_RUN=tr
 | Only the `hello_world` template (en_US) can be sent | Demo scope. The allow-list is one constant in `send-whatsapp/handler.ts`. |
 | Rate limit: 20 messages per staff member per minute, counted in the database | Works across function instances without extra infrastructure. |
 | Graph API calls: 3 tries, backoff 0.5 s then 1 s, 15 s timeout, retry only on network errors, 429 and 5xx | 4xx answers are real rejections and are shown to staff. Known trade-off: if Meta processed a send but answered 5xx, a retry could deliver it twice. |
-| Graph API version is `WA_GRAPH_VERSION`, default `v24.0` | Meta retires versions; changing it must not need a deploy. I could not check from here which version is current for your app. |
+| Graph API version is `WA_GRAPH_VERSION`, default `v26.0` | Meta retires versions; changing it must not need a deploy. v26.0 is the current version (see part 2). |
 | A separate `admin-staff` function, admin role checked on the server | The service role key never leaves Supabase. |
 | First admin is created in the dashboard plus one SQL statement | The alternative (a script with the service role key on your machine) breaks the "service key only in Supabase" rule. |
 | Handlers take their dependencies as arguments (`handler.ts`), `index.ts` wires the real Supabase client | The Deno tests run in milliseconds with no network and no project. |
@@ -109,3 +109,96 @@ PostgREST, Realtime, Storage and the Edge Runtime in Docker) with `WA_DRY_RUN=tr
 - `supabase link`, `db push`, `secrets set`, `functions deploy` against your hosted project
   (the CLI here is not logged in). The same migration and functions ran on the local stack.
 - Hosting on Cloudflare Pages / Netlify (settings are documented, not deployed).
+
+
+---
+
+# Part 2: real-API correctness and WhatsApp-like features
+
+## 6. How the Meta documentation was read
+
+The task said to read the current official docs and not rely on memory. `developers.facebook.com` and
+`graph.facebook.com` are **blocked by this session's network policy**, so I could not open the pages
+directly. I read them through web search restricted to `developers.facebook.com`, which returns the content
+of the official pages. To read them directly next time, allow `developers.facebook.com` in the session's
+network settings. Consequence: facts below marked "confirmed" came from the official pages via search;
+anything I could not find there is marked "not confirmed" and is covered by a step in REAL_TEST_PLAN.md.
+
+| Fact | Source page | Status |
+| --- | --- | --- |
+| Latest Graph API version is **v26.0**, released 2026-07-29. v24.0 was still valid but two versions old. | Graph API changelog / versions | confirmed. Default changed from v24.0 to v26.0. |
+| Mark as read: `POST /<phone id>/messages` `{ messaging_product, status: "read", message_id }`; adding `typing_indicator: { type: "text" }` shows "typing…" (dismissed on send or after 25 s); marking one message marks earlier ones; within 30 days | "Mark messages as read", "Typing indicators" | confirmed |
+| Reaction: `type: "reaction"`, `reaction: { message_id, emoji }`, empty emoji removes; not for messages older than 30 days | Messages reference | confirmed |
+| Quote: top-level `context: { message_id }` | Messages reference | confirmed |
+| Audio: AAC, AMR, MP3, M4A, OGG (Opus only, mono), 16 MB. Voice notes need OGG/Opus and `audio.voice: true`. A "played" status exists for voice notes (since 2026-03-17) | "Audio messages", Media reference | confirmed |
+| Images JPEG/PNG **5 MB**; video MP4/3GP 16 MB (H.264 + AAC); documents 100 MB; stickers WebP | Media reference | confirmed |
+| Media download: `GET /<media id>` → `{ url, mime_type, sha256, file_size }`; download the URL with the bearer token; URL valid 5 minutes | Media reference | confirmed |
+| Sending by `link` works (Meta caches the asset 10 minutes) but uploading and sending by `id` is recommended | Media reference, image / video pages | confirmed |
+| Incoming shapes for audio (`voice`), contacts, interactive (`button_reply`, `list_reply`), button (`payload`, `text`), unsupported (`unsupported.type`, error 131051), failed statuses (`errors[].code/title/message/error_data.details`) | Webhook reference pages | confirmed |
+| Incoming shapes for location and reaction, and `context.forwarded` | Webhook reference | **not confirmed** by the search (pages exist, content not returned). Implemented from the long-standing documented format; REAL_TEST_PLAN steps 9, 10. |
+| Since April 2026 webhooks carry a business-scoped user id (`from_user_id`, `contacts[].user_id`); the phone number can be missing for customers with a username; such customers are addressed with `recipient` instead of `to` | "Business-scoped user IDs" | confirmed for webhooks. Sending to a user id: documented, start date not confirmed. |
+| Error codes 190, 131026, 131047, 131049, 131051, 131053, 131031, 132000, 132001, 132015, 133010, 80007, 130429, 131016, 131021, 131057 | "WhatsApp error codes" | confirmed |
+| Error codes 131030, 131052, 131056 | same page | **not returned** by the search. Mapped from their long-standing meaning. |
+
+## 7. Mismatches found in the audit, and the fixes
+
+| # | Mismatch with the real API | Fix |
+| --- | --- | --- |
+| 1 | Default Graph version v24.0 was two versions behind. | Default `v26.0`; `real-check` compares the requested version with the one Meta actually served. |
+| 2 | A customer without a visible phone number (username users, 2026) was **silently dropped**: the webhook required a numeric `from`. | Messages are accepted with `from_user_id`; conversations are matched by phone number or user id and learn the other one when Meta sends it; replies use `recipient` when there is no number. Verified on the local database (three messages, with and without number, land in one chat). |
+| 3 | Audio, video, stickers, locations, contacts, button and list replies were stored as "[Unsupported message type]". | All are stored as their own type and rendered. |
+| 4 | Reactions from the customer were stored as an "unsupported" message. | They update the reacted-to message (`reaction_customer`); a reaction without emoji removes it. |
+| 5 | Quotes were lost in both directions. | `context.id` is stored; `reply_to` is sent as `context.message_id`. |
+| 6 | The `played` status was ignored. | Accepted, after `read`. |
+| 7 | Photos up to 10 MB were accepted and would fail at Meta (limit 5 MB). | 5 MB for photos in the app and in `send-whatsapp`. |
+| 8 | Only images and PDFs were stored; WhatsApp voice notes arrive as `audio/ogg; codecs=opus`. | Bucket and code accept Meta's audio/video types and common office documents; 16 MB (Meta's audio/video limit). A file type that does not fit its message type (a PDF sent as "image") is refused. |
+| 9 | Failed sends and failed statuses showed Meta's raw text. | `_shared/wa_errors.ts` maps the codes to staff-facing sentences and always appends "(code N)". |
+| 10 | The business never told WhatsApp that messages were read, so customers never saw blue ticks. | New `mark-read` function, called when a chat is opened or a message arrives in the open chat; optional typing indicator. |
+| 11 | An expired token during media download produced "HTTP 401". | "…the WhatsApp access token is invalid or expired". |
+| 12 | Voice notes uploaded from the browser were stored as `audio/ogg` without the Opus parameter, because Storage drops it for multipart uploads. Meta requires OGG audio to be declared as Opus. | The web app uploads raw bytes with the full Content-Type. Found by the Playwright test that downloads the stored file. **The APK must upload the same way.** |
+
+24-hour window logic was re-checked and left as it was: the window is counted from the time WhatsApp
+reports for the customer's last message; templates are always allowed; reactions and quoted replies need an
+open window because they are normal (non-template) messages.
+
+## 8. Decisions in part 2
+
+| Decision | Why |
+| --- | --- |
+| Signed-link sending stays the default; `WA_MEDIA_MODE=upload` switches to "upload to Meta, send by id" | The task asks for signed URLs. Meta recommends ids, and I cannot prove from here that Meta accepts our link for every type (audio is the risky one). The switch needs no deploy. |
+| Voice notes: record with `MediaRecorder`, force mono through the Web Audio API, and **repackage** Chrome's WebM/Opus into OGG/Opus in the browser (about 150 lines, no library) | Meta accepts OGG/Opus but not WebM. The Opus packets are identical in both containers, so no re-encoding and no multi-megabyte ffmpeg download. Firefox records OGG directly. Safari can only record AAC/MP4, which WhatsApp accepts as normal audio, not as a voice note. The result is checked with ffprobe in the test (Opus, mono, decodes cleanly). |
+| Reactions are columns on the message (`reaction_customer`, `reaction_business`), not rows | WhatsApp allows one reaction per participant per message, and the business is one participant, whoever of the staff clicks. Updates travel through the existing Realtime subscription. |
+| `mark-read` never returns an error for a Meta failure | Staff must be able to read a chat when Meta is down or the token expired. The reason is in the response and the function log. |
+| Typing indicator at most every 20 seconds | WhatsApp shows it for 25 seconds; one call per keystroke would burn the rate limit. |
+| Starred and hidden are per staff member (`message_flags`); hidden messages are filtered in that person's view and in their search | "Hide for me" must not affect colleagues, and nothing can be deleted for the customer anyway. The UI says so at the moment of hiding. |
+| Quick replies are shared by all staff and any staff member can edit them | Small team; one place to maintain. Three starter snippets are created when the table is empty. |
+| Notes and labels live on the conversation and are edited through one RPC | Everyone sees them live; clients still cannot write tables directly. |
+| Message search is `ILIKE` on body and file name, limited to 100 hits | Simple and correct at demo scale. A trigram index is the next step if it gets slow. |
+| Unread divider is computed once when the chat opens; pages are 50 messages; older pages load when scrolling near the top | WhatsApp behaviour. A jump to an older message (search, star, quote) loads everything between it and the loaded part, so the list never has a gap. |
+| Location opens a Google Maps link; no embedded map | No map key or third-party script in the app. The link is built from the stored numbers only, never from a URL the customer sent. |
+| Emoji picker is a fixed set of 80; reactions offer 6 | No dependency. |
+| Settings (theme, sound, notifications) are per browser in `localStorage` | They are device preferences, not account data. Sound is on by default, notifications are off until the user allows them. |
+| The setup SQL is now all migrations concatenated (`npm run check:sql`) | The first migration may already be applied on your project, so new schema goes in a second file. |
+| Incoming message types nobody can render (polls, orders, live location, deleted messages) are stored as type `other` with a readable note | Staff see that the customer sent something and can ask for it in another form. |
+| Not built, on purpose | Online / last seen, Status/Stories, editing or deleting sent messages for the customer, calls: the official API has none of them. The customer details panel and the message menu say so. |
+
+## 9. Defects found while building part 2
+
+| # | Defect | Found by | Fix |
+| --- | --- | --- | --- |
+| 7 | Voice notes lost their `codecs=opus` content type on upload (see mismatch 12). | Playwright voice test | Raw-bytes upload. |
+| 8 | Jumping twice to the same message within 2.5 s did not scroll the second time. | Playwright search test | Every jump creates a new highlight object. |
+| 9 | "Scroll to latest" did not count new messages when the chat was opened at the unread divider. | Playwright history test | The last seen message is recorded on the first scroll event too. |
+| 10 | Location and contact cards picked up the login card's CSS class and were drawn as big boxes. | Screenshot review | Separate class. |
+| 11 | On a phone the message menu ran off the right edge of the screen, and the menu arrow overlapped the text. | Screenshot review | The menu is a bottom sheet under 768 px; text leaves room for the arrow on touch screens. |
+| 12 | Adding the root `package.json` made `deno check` look for `node_modules`. | Running the checks | Deno scripts use `--no-config`. |
+
+## 10. Not verified in part 2 (needs your credentials or phone)
+
+- Every call to Meta: sending text, media, voice notes, templates, reactions and quotes; mark-as-read and
+  typing; media download; Meta fetching our signed links; real webhook payloads from a phone.
+  All request bodies are asserted in Deno tests against the documented shapes; REAL_TEST_PLAN.md covers each.
+- `scripts/real-check.mjs` against the real Graph API. It was run against the local stack and a local
+  stand-in for the Graph API (pass and fail cases, secrets redacted).
+- Deploying the new migration and the `mark-read` function to your hosted project.
+- Recording in Firefox and Safari (only Chromium was run).

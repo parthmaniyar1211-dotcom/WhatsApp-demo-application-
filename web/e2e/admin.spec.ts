@@ -1,7 +1,7 @@
 // Admin page end-to-end test. Needs an admin login in ../.env (E2E_ADMIN_ID / E2E_ADMIN_PASSWORD).
 
 import { expect, test } from "@playwright/test";
-import { conversationItem, env, login, missingForE2E, newCustomer, simulateIncoming } from "./helpers";
+import { conversationItem, env, login, missingForE2E, newCustomer, openSettings, simulateIncoming } from "./helpers";
 
 test.beforeEach(() => {
   const reason = missingForE2E();
@@ -15,7 +15,8 @@ test("admin creates, resets and disables a staff login", async ({ page, browser 
   const secondPassword = "second-Password-2";
 
   await login(page, env.adminId, env.adminPassword);
-  await page.getByRole("link", { name: "Admin" }).click();
+  await openSettings(page);
+  await page.getByRole("menuitem", { name: "Admin: staff accounts" }).click();
   await expect(page.getByTestId("admin-page")).toBeVisible();
 
   // Create
@@ -33,7 +34,8 @@ test("admin creates, resets and disables a staff login", async ({ page, browser 
   const staffPage = await staffContext.newPage();
   await login(staffPage, staffId, firstPassword);
   // Staff do not get the admin page, even by URL.
-  await expect(staffPage.getByRole("link", { name: "Admin" })).toHaveCount(0);
+  await openSettings(staffPage);
+  await expect(staffPage.getByRole("menuitem", { name: "Admin: staff accounts" })).toHaveCount(0);
   await staffPage.goto("/#/admin");
   await expect(staffPage.getByTestId("admin-page")).toHaveCount(0);
 
