@@ -4,7 +4,15 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.119.0";
 import { BUCKET } from "./media.ts";
 import type { IncomingMessage, WebhookStore } from "../whatsapp-webhook/handler.ts";
-import type { ConversationRow, MessageRow, NewOutgoing, SendStore, StaffRow } from "../send-whatsapp/handler.ts";
+import type {
+  ConversationRow,
+  MessageRef,
+  MessageRow,
+  NewOutgoing,
+  SendStore,
+  StaffRow,
+} from "../send-whatsapp/handler.ts";
+import type { MarkReadStore } from "../mark-read/handler.ts";
 import type { AdminStaffRow, AdminStore } from "../admin-staff/handler.ts";
 
 export function serviceClient(): SupabaseClient {
@@ -38,23 +46,34 @@ export function webhookStore(db: SupabaseClient): WebhookStore {
   return {
     async ingestIncoming(m: IncomingMessage) {
       return check(
-        await db.rpc("ingest_incoming_message", {
-          p_wa_id: m.waId,
-          p_customer_name: m.customerName,
-          p_wa_message_id: m.waMessageId,
-          p_type: m.type,
-          p_body: m.body,
-          p_media_mime: m.mediaMime,
-          p_media_filename: m.mediaFilename,
-          p_wa_timestamp: m.timestamp,
+        await db.rpc("ingest_incoming", {
+          p: {
+            wa_id: m.waId,
+            user_id: m.userId,
+            customer_name: m.customerName,
+            wa_message_id: m.waMessageId,
+            type: m.type,
+            body: m.body,
+            media_mime: m.mediaMime,
+            media_filename: m.mediaFilename,
+            media_voice: m.mediaVoice,
+            wa_timestamp: m.timestamp,
+            reply_to: m.replyTo,
+            forwarded: m.forwarded,
+            location: m.location,
+            contacts: m.contacts,
+          },
         }),
         "store incoming message",
       ) as string | null;
     },
-    async saveMedia(messageId, path, bytes, mime) {
-      const upload = await db.storage.from(BUCKET).upload(path, bytes, { contentType: mime, upsert: true });
+    async saveMedia(messageId, path, bytes, contentType) {
+      const upload = await db.storage.from(BUCKET).upload(path, bytes, { contentType, upsert: true });
       if (upload.error) throw new Error(`upload file: ${upload.error.message}`);
-      check(await db.from("wa_messages").update({ media_path: path }).eq("id", messageId), "link file");
+      check(
+        await db.from("wa_messages").update({ media_path: path, media_size: bytes.byteLength }).eq("id", messageId),
+        "link file",
+      );
     },
     async setMessageError(messageId, error) {
       check(await db.from("wa_messages").update({ error }).eq("id", messageId), "record file error");
@@ -63,6 +82,12 @@ export function webhookStore(db: SupabaseClient): WebhookStore {
       return check(
         await db.rpc("apply_message_status", { p_wa_message_id: waMessageId, p_status: status, p_error: error }),
         "apply status",
+      ) as boolean;
+    },
+    async applyReaction(waMessageId, emoji) {
+      return check(
+        await db.rpc("apply_customer_reaction", { p_wa_message_id: waMessageId, p_emoji: emoji }),
+        "apply reaction",
       ) as boolean;
     },
   };
@@ -77,6 +102,12 @@ export function sendStore(db: SupabaseClient): SendStore {
         await db.from("conversations").select("id, wa_id, last_inbound_at").eq("id", id).maybeSingle(),
         "load conversation",
       ) as ConversationRow | null;
+    },
+    async getMessage(id) {
+      return check(
+        await db.from("wa_messages").select("id, conversation_id, wa_message_id").eq("id", id).maybeSingle(),
+        "load message",
+      ) as MessageRef | null;
     },
     async countRecentSends(userId, sinceIso) {
       const { count, error } = await db.from("wa_messages").select("id", { count: "exact", head: true })
@@ -94,16 +125,26 @@ export function sendStore(db: SupabaseClient): SendStore {
       if (error || !data) throw new Error(`sign file url: ${error?.message}`);
       return data.signedUrl;
     },
+    async downloadFile(path) {
+      const { data, error } = await db.storage.from(BUCKET).download(path);
+      if (error || !data) throw new Error(`download file: ${error?.message}`);
+      return new Uint8Array(await data.arrayBuffer());
+    },
     async createOutgoing(m: NewOutgoing) {
       return check(
-        await db.rpc("create_outgoing_message", {
-          p_conversation_id: m.conversationId,
-          p_sent_by: m.sentBy,
-          p_type: m.type,
-          p_body: m.body,
-          p_media_path: m.mediaPath,
-          p_media_mime: m.mediaMime,
-          p_media_filename: m.mediaFilename,
+        await db.rpc("create_outgoing", {
+          p: {
+            conversation_id: m.conversationId,
+            sent_by: m.sentBy,
+            type: m.type,
+            body: m.body,
+            media_path: m.mediaPath,
+            media_mime: m.mediaMime,
+            media_filename: m.mediaFilename,
+            media_size: m.mediaSize,
+            media_voice: m.mediaVoice,
+            reply_to: m.replyTo,
+          },
         }),
         "store outgoing message",
       ) as MessageRow;
@@ -116,6 +157,40 @@ export function sendStore(db: SupabaseClient): SendStore {
         await db.from("wa_messages").update(update).eq("id", id).select("*").single(),
         "finish message",
       ) as MessageRow;
+    },
+    async setBusinessReaction(messageId, emoji, staffId) {
+      return check(
+        await db.from("wa_messages")
+          .update({ reaction_business: emoji, reaction_business_by: emoji ? staffId : null })
+          .eq("id", messageId).select("*").single(),
+        "store reaction",
+      ) as MessageRow;
+    },
+  };
+}
+
+export function markReadStore(db: SupabaseClient): MarkReadStore {
+  return {
+    getUserId: (jwt) => getUserId(db, jwt),
+    getStaff: (userId) => getStaff(db, userId),
+    async getConversation(id) {
+      return check(
+        await db.from("conversations").select("id, meta_read_wa_message_id").eq("id", id).maybeSingle(),
+        "load conversation",
+      );
+    },
+    async getLatestIncoming(conversationId) {
+      return check(
+        await db.from("wa_messages").select("wa_message_id, created_at").eq("conversation_id", conversationId)
+          .eq("direction", "in").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        "load latest incoming message",
+      );
+    },
+    async setMetaRead(conversationId, waMessageId) {
+      check(
+        await db.from("conversations").update({ meta_read_wa_message_id: waMessageId }).eq("id", conversationId),
+        "remember read message",
+      );
     },
   };
 }

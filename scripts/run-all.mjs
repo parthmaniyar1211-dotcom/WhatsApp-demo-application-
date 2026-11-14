@@ -3,7 +3,7 @@
 //
 //   node scripts/run-all.mjs
 //
-// Needs WA_DRY_RUN=true on the server for the image and document steps.
+// Needs WA_DRY_RUN=true on the server for the media steps (image, document, audio, video, sticker).
 
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
@@ -16,6 +16,11 @@ const steps = [
   ["simulate-incoming.mjs", "text", "Hello from the harness"],
   ["simulate-incoming.mjs", "image", "A test photo"],
   ["simulate-incoming.mjs", "document", "test-document.pdf"],
+  ["simulate-incoming.mjs", "audio"],
+  ["simulate-incoming.mjs", "video", "A test video"],
+  ["simulate-incoming.mjs", "sticker"],
+  ["simulate-incoming.mjs", "location", "Gateway of India"],
+  ["simulate-incoming.mjs", "contacts", "Ravi Kumar"],
   ["simulate-duplicate.mjs"],
 ];
 

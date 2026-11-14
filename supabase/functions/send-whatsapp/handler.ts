@@ -2,26 +2,30 @@
 //
 // Requires a staff JWT. Enforces:
 //   * the caller is an active (not disabled) staff member,
-//   * the WhatsApp 24-hour window for free text / files (templates are always allowed),
-//   * file rules (JPEG/PNG/PDF, max 10 MB, only from the caller's own upload folder),
+//   * the WhatsApp 24-hour window for everything except templates,
+//   * file rules (type and size, only from the caller's own upload folder),
 //   * a per-user rate limit.
 // With WA_DRY_RUN=true no call is made to Meta and a fake message id is returned.
 //
-// Request body (JSON):
-//   { "conversation_id": "<uuid>", "text": "hello" }
-//   { "conversation_id": "<uuid>", "media_path": "outgoing/<user id>/<file>", "text": "caption", "filename": "a.pdf" }
+// Request body (JSON), one of:
+//   { "conversation_id": "<uuid>", "text": "hello", "reply_to": "<message uuid>"? }
+//   { "conversation_id": "<uuid>", "media_path": "outgoing/<user id>/<file>", "text": "caption"?,
+//     "filename": "a.pdf"?, "voice": true?, "reply_to": "<message uuid>"? }
 //   { "conversation_id": "<uuid>", "template": "hello_world" }
+//   { "conversation_id": "<uuid>", "reaction": { "message_id": "<message uuid>", "emoji": "👍" } }   ("" removes it)
 // Response: { "message": <wa_messages row> }  (HTTP 502 with the failed row when Meta rejects it)
 
 import { bearerToken, corsHeaders, HttpError, json, logError, parseJsonObject, readBody } from "../_shared/http.ts";
-import { fetchWithRetry, type FetchFn, graphErrorReason, graphUrl, type SleepFn } from "../_shared/graph.ts";
-import { cleanMime, MAX_FILE_BYTES, outgoingKind, safeFilename } from "../_shared/media.ts";
+import { fetchWithRetry, type FetchFn, graphUrl, type SleepFn } from "../_shared/graph.ts";
+import { cleanMime, outgoingRule, safeFilename, storedContentType } from "../_shared/media.ts";
+import { staffMessage } from "../_shared/wa_errors.ts";
 
 export interface SendEnv {
   token?: string; // WA_TOKEN
   phoneId?: string; // WA_PHONE_ID
   graphVersion: string;
   dryRun: boolean; // WA_DRY_RUN
+  mediaMode?: "link" | "upload"; // WA_MEDIA_MODE, default "link"
 }
 
 export interface StaffRow {
@@ -33,20 +37,31 @@ export interface StaffRow {
 
 export interface ConversationRow {
   id: string;
-  wa_id: string;
+  wa_id: string; // phone number (digits) or business-scoped user id
   last_inbound_at: string | null;
 }
 
 export type MessageRow = Record<string, unknown> & { id: string };
 
+export interface MessageRef {
+  id: string;
+  conversation_id: string;
+  wa_message_id: string | null;
+}
+
+export type OutgoingType = "text" | "image" | "document" | "audio" | "video" | "template";
+
 export interface NewOutgoing {
   conversationId: string;
   sentBy: string;
-  type: "text" | "image" | "document" | "template";
+  type: OutgoingType;
   body: string | null;
   mediaPath: string | null;
   mediaMime: string | null;
   mediaFilename: string | null;
+  mediaSize: number | null;
+  mediaVoice: boolean;
+  replyTo: string | null; // wamid of the quoted message
 }
 
 export interface SendStore {
@@ -54,14 +69,18 @@ export interface SendStore {
   getUserId(jwt: string): Promise<string | null>;
   getStaff(userId: string): Promise<StaffRow | null>;
   getConversation(id: string): Promise<ConversationRow | null>;
+  getMessage(id: string): Promise<MessageRef | null>;
   countRecentSends(userId: string, sinceIso: string): Promise<number>;
   getFileInfo(path: string): Promise<{ size: number; mime: string } | null>;
   createSignedUrl(path: string, expiresInSeconds: number): Promise<string>;
+  downloadFile(path: string): Promise<Uint8Array>;
   createOutgoing(message: NewOutgoing): Promise<MessageRow>;
   finishOutgoing(
     id: string,
     result: { status: "sent" | "failed"; waMessageId?: string; error?: string },
   ): Promise<MessageRow>;
+  /** Stores our reaction on a message (null removes it) and returns the row. */
+  setBusinessReaction(messageId: string, emoji: string | null, staffId: string): Promise<MessageRow>;
 }
 
 export interface SendDeps {
@@ -80,11 +99,14 @@ export const MAX_CAPTION_LENGTH = 1024; // WhatsApp caption limit
 const SIGNED_URL_SECONDS = 10 * 60; // long enough for Meta to fetch the file, then it expires
 const MAX_BODY_BYTES = 16 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const WINDOW_CLOSED = "The 24-hour window is closed. Only a template message can be sent until the customer writes again.";
 
 // Approved templates that may be sent from the console. hello_world exists in every Meta test account.
 const TEMPLATES: Record<string, { language: string }> = {
   hello_world: { language: "en_US" },
 };
+
+type Outcome = { ok: true; waMessageId: string } | { ok: false; error: string };
 
 export function createSendHandler(deps: SendDeps): (req: Request) => Promise<Response> {
   return async (req) => {
@@ -125,15 +147,25 @@ async function send(req: Request, deps: SendDeps): Promise<Response> {
   const text = typeof input.text === "string" ? input.text.trim() : "";
   const mediaPath = input.media_path;
   const templateName = input.template;
+  const present = (value: unknown) => value !== undefined && value !== null;
 
-  let type: NewOutgoing["type"];
-  if (templateName !== undefined && templateName !== null) {
+  if (present(input.reaction)) {
+    if (text || present(mediaPath) || present(templateName) || present(input.reply_to)) {
+      throw new HttpError(400, "A reaction cannot be combined with anything else", "invalid");
+    }
+    return await react(deps, staff, conversationId, input.reaction, now);
+  }
+
+  let type: OutgoingType;
+  if (present(templateName)) {
     if (typeof templateName !== "string" || !Object.hasOwn(TEMPLATES, templateName)) {
       throw new HttpError(400, "Unknown template", "invalid");
     }
-    if (text || mediaPath) throw new HttpError(400, "A template cannot be combined with text or a file", "invalid");
+    if (text || present(mediaPath) || present(input.reply_to)) {
+      throw new HttpError(400, "A template cannot be combined with text, a file or a reply", "invalid");
+    }
     type = "template";
-  } else if (mediaPath !== undefined && mediaPath !== null) {
+  } else if (present(mediaPath)) {
     // Only files the caller uploaded themselves: outgoing/<their user id>/<file name>
     if (
       typeof mediaPath !== "string" || mediaPath.length > 300 || mediaPath.includes("..") ||
@@ -157,62 +189,93 @@ async function send(req: Request, deps: SendDeps): Promise<Response> {
   const conversation = await store.getConversation(conversationId);
   if (!conversation) throw new HttpError(404, "Conversation not found", "not_found");
   if (type !== "template" && !isWindowOpen(conversation.last_inbound_at, now)) {
-    throw new HttpError(
-      409,
-      "The 24-hour window is closed. Only a template message can be sent until the customer writes again.",
-      "window_closed",
-    );
+    throw new HttpError(409, WINDOW_CLOSED, "window_closed");
   }
 
-  // 4. Rate limit.
+  // 4. The quoted message, if this is a reply.
+  let replyTo: string | null = null;
+  if (present(input.reply_to)) {
+    replyTo = (await targetMessage(store, input.reply_to, conversationId, "reply_to")).wa_message_id;
+  }
+
+  // 5. Rate limit.
   const recent = await store.countRecentSends(userId, new Date(now - RATE_LIMIT_WINDOW_MS).toISOString());
   if (recent >= RATE_LIMIT_MAX) {
     throw new HttpError(429, "Too many messages. Wait a minute and try again.", "rate_limited");
   }
 
-  // 5. File checks (the bucket enforces the same limits at upload time).
+  // 6. File checks (the bucket enforces type and an upper size limit at upload time as well).
   let mediaMime: string | null = null;
   let mediaFilename: string | null = null;
+  let mediaSize: number | null = null;
+  let mediaVoice = false;
   if (typeof mediaPath === "string" && type !== "template") {
     const info = await store.getFileInfo(mediaPath);
     if (!info) throw new HttpError(400, "File not found. Upload it again.", "invalid");
-    if (info.size > MAX_FILE_BYTES) throw new HttpError(413, "File is larger than 10 MB", "too_large");
     mediaMime = cleanMime(info.mime);
-    const kind = outgoingKind(mediaMime);
-    if (!kind) throw new HttpError(400, "Only JPEG/PNG images and PDF files can be sent", "invalid");
-    type = kind;
-    if (kind === "document") mediaFilename = safeFilename(input.filename, "document.pdf");
+    const rule = outgoingRule(mediaMime);
+    if (!rule) {
+      throw new HttpError(400, "Only JPEG/PNG photos, PDF files, MP4 videos and audio can be sent", "invalid");
+    }
+    if (info.size > rule.maxBytes) {
+      throw new HttpError(413, `File is larger than ${rule.maxBytes / 1024 / 1024} MB`, "too_large");
+    }
+    type = rule.kind;
+    mediaSize = info.size;
+    if (type === "audio" && text) throw new HttpError(400, "Audio cannot have a caption", "invalid");
+    if (type === "document") mediaFilename = safeFilename(input.filename, "document.pdf");
+    // WhatsApp shows OGG/Opus as a voice note (with transcription) when "voice" is set.
+    mediaVoice = type === "audio" && mediaMime === "audio/ogg" && input.voice === true;
   }
 
-  if (!env.dryRun && (!env.token || !env.phoneId)) {
-    console.error("send-whatsapp: WA_TOKEN or WA_PHONE_ID is not set");
-    throw new HttpError(500, "WhatsApp is not configured on the server", "not_configured");
-  }
+  requireConfigured(env);
 
-  // 6. Store the message first, so it is visible (as "sending") even if the call to Meta is slow.
+  // 7. Store the message first, so it is visible (as "sending") even if the call to Meta is slow.
   const row = await store.createOutgoing({
     conversationId,
     sentBy: userId,
     type,
     body: type === "template" ? (templateName as string) : text || null,
-    mediaPath: type === "image" || type === "document" ? (mediaPath as string) : null,
+    mediaPath: mediaMime ? (mediaPath as string) : null,
     mediaMime,
     mediaFilename,
+    mediaSize,
+    mediaVoice,
+    replyTo,
   });
 
-  // 7. Send.
-  let outcome: { ok: true; waMessageId: string } | { ok: false; error: string };
+  // 8. Send.
+  let outcome: Outcome;
   try {
     if (env.dryRun) {
       outcome = { ok: true, waMessageId: `wamid.DRYRUN.${crypto.randomUUID()}` };
     } else {
-      const link = row.media_path ? await store.createSignedUrl(row.media_path as string, SIGNED_URL_SECONDS) : null;
-      const graphBody = buildGraphBody(conversation.wa_id, type, text, link, mediaFilename, templateName as string);
+      const graphBody: Record<string, unknown> = { ...recipient(conversation.wa_id), type };
+      if (replyTo) graphBody.context = { message_id: replyTo };
+      if (type === "text") {
+        graphBody.text = { body: text, preview_url: false };
+      } else if (type === "template") {
+        const name = templateName as string;
+        graphBody.template = { name, language: { code: TEMPLATES[name].language } };
+      } else {
+        const media = await mediaReference(deps, row.media_path as string, mediaMime as string);
+        if (!media.ok) throw new GraphFailure(media.error);
+        graphBody[type] = {
+          ...media.reference,
+          ...(text ? { caption: text } : {}),
+          ...(type === "document" ? { filename: mediaFilename } : {}),
+          ...(mediaVoice ? { voice: true } : {}),
+        };
+      }
       outcome = await callGraph(deps, graphBody);
     }
   } catch (err) {
-    logError("send-whatsapp: Graph API call failed", err);
-    outcome = { ok: false, error: "Could not reach WhatsApp. Try again." };
+    if (err instanceof GraphFailure) {
+      outcome = { ok: false, error: err.message };
+    } else {
+      logError("send-whatsapp: Graph API call failed", err);
+      outcome = { ok: false, error: "Could not reach WhatsApp. Try again." };
+    }
   }
 
   console.log(`send-whatsapp: message=${row.id} type=${type} dry_run=${env.dryRun} ok=${outcome.ok}`);
@@ -224,37 +287,120 @@ async function send(req: Request, deps: SendDeps): Promise<Response> {
   return json({ error: outcome.error, code: "send_failed", message: failed }, 502, corsHeaders);
 }
 
+/** Reaction to a message of the conversation. Reactions need an open 24-hour window too. */
+async function react(
+  deps: SendDeps,
+  staff: StaffRow,
+  conversationId: string,
+  rawReaction: unknown,
+  now: number,
+): Promise<Response> {
+  const { env, store } = deps;
+  const reaction = typeof rawReaction === "object" && rawReaction !== null
+    ? (rawReaction as Record<string, unknown>)
+    : {};
+  const emoji = reaction.emoji;
+  // One emoji (which can be several code points, for example with a skin tone), or "" to remove.
+  if (typeof emoji !== "string" || emoji.length > 32 || /[\s\w]/.test(emoji)) {
+    throw new HttpError(400, "reaction.emoji must be a single emoji, or empty to remove the reaction", "invalid");
+  }
+  const conversation = await store.getConversation(conversationId);
+  if (!conversation) throw new HttpError(404, "Conversation not found", "not_found");
+  const target = await targetMessage(store, reaction.message_id, conversationId, "reaction.message_id");
+  if (!isWindowOpen(conversation.last_inbound_at, now)) throw new HttpError(409, WINDOW_CLOSED, "window_closed");
+
+  const recent = await store.countRecentSends(staff.user_id, new Date(now - RATE_LIMIT_WINDOW_MS).toISOString());
+  if (recent >= RATE_LIMIT_MAX) {
+    throw new HttpError(429, "Too many messages. Wait a minute and try again.", "rate_limited");
+  }
+  requireConfigured(env);
+
+  if (!env.dryRun) {
+    let outcome: Outcome;
+    try {
+      outcome = await callGraph(deps, {
+        ...recipient(conversation.wa_id),
+        type: "reaction",
+        reaction: { message_id: target.wa_message_id, emoji },
+      });
+    } catch (err) {
+      logError("send-whatsapp: Graph API call failed", err);
+      outcome = { ok: false, error: "Could not reach WhatsApp. Try again." };
+    }
+    if (!outcome.ok) return json({ error: outcome.error, code: "send_failed" }, 502, corsHeaders);
+  }
+  console.log(`send-whatsapp: reaction on message=${target.id} dry_run=${env.dryRun}`);
+  const saved = await store.setBusinessReaction(target.id, emoji || null, staff.staff_id);
+  return json({ message: saved, dry_run: env.dryRun }, 200, corsHeaders);
+}
+
+/** A message of this conversation that WhatsApp knows (it has a wamid). */
+async function targetMessage(
+  store: SendStore,
+  id: unknown,
+  conversationId: string,
+  field: string,
+): Promise<MessageRef & { wa_message_id: string }> {
+  if (typeof id !== "string" || !UUID.test(id)) throw new HttpError(400, `${field} must be a message id`, "invalid");
+  const message = await store.getMessage(id);
+  if (!message || message.conversation_id !== conversationId) {
+    throw new HttpError(404, "That message is not part of this conversation", "not_found");
+  }
+  if (!message.wa_message_id) {
+    throw new HttpError(409, "That message was never delivered to WhatsApp, so it cannot be quoted or reacted to", "invalid");
+  }
+  return message as MessageRef & { wa_message_id: string };
+}
+
+function requireConfigured(env: SendEnv): void {
+  if (!env.dryRun && (!env.token || !env.phoneId)) {
+    console.error("send-whatsapp: WA_TOKEN or WA_PHONE_ID is not set");
+    throw new HttpError(500, "WhatsApp is not configured on the server", "not_configured");
+  }
+}
+
 export function isWindowOpen(lastInboundAt: string | null, now: number): boolean {
   if (!lastInboundAt) return false;
   const last = Date.parse(lastInboundAt);
   return Number.isFinite(last) && now - last < WINDOW_MS;
 }
 
-function buildGraphBody(
-  to: string,
-  type: NewOutgoing["type"],
-  text: string,
-  link: string | null,
-  filename: string | null,
-  templateName: string,
-): Record<string, unknown> {
-  const base = { messaging_product: "whatsapp", recipient_type: "individual", to, type };
-  switch (type) {
-    case "text":
-      return { ...base, text: { body: text, preview_url: false } };
-    case "image":
-      return { ...base, image: { link, ...(text ? { caption: text } : {}) } };
-    case "document":
-      return { ...base, document: { link, filename, ...(text ? { caption: text } : {}) } };
-    case "template":
-      return { ...base, template: { name: templateName, language: { code: TEMPLATES[templateName].language } } };
-  }
+/** Phone numbers go in "to". Customers known only by their business-scoped user id go in "recipient". */
+function recipient(waId: string): Record<string, unknown> {
+  const base = { messaging_product: "whatsapp", recipient_type: "individual" };
+  return /^\d+$/.test(waId) ? { ...base, to: waId } : { ...base, recipient: waId };
 }
 
-async function callGraph(
+class GraphFailure extends Error {}
+
+/** How the file is handed to Meta: a short-lived signed link (default) or an uploaded media id. */
+async function mediaReference(
   deps: SendDeps,
-  body: Record<string, unknown>,
-): Promise<{ ok: true; waMessageId: string } | { ok: false; error: string }> {
+  path: string,
+  mime: string,
+): Promise<{ ok: true; reference: { link: string } | { id: string } } | { ok: false; error: string }> {
+  const { env, store } = deps;
+  if (env.mediaMode !== "upload") {
+    return { ok: true, reference: { link: await store.createSignedUrl(path, SIGNED_URL_SECONDS) } };
+  }
+  const bytes = await store.downloadFile(path);
+  const contentType = storedContentType(mime);
+  const form = new FormData();
+  form.set("messaging_product", "whatsapp");
+  form.set("type", contentType);
+  form.set("file", new Blob([bytes as BlobPart], { type: contentType }), path.split("/").pop() ?? "file");
+  const response = await fetchWithRetry(
+    graphUrl(env.graphVersion, `${env.phoneId}/media`),
+    { method: "POST", headers: { Authorization: `Bearer ${env.token}` }, body: form },
+    { fetchFn: deps.fetchFn, sleep: deps.sleep },
+  );
+  if (!response.ok) return { ok: false, error: await graphError(response) };
+  const id = (await response.json())?.id;
+  if (typeof id !== "string") return { ok: false, error: "WhatsApp did not accept the file" };
+  return { ok: true, reference: { id } };
+}
+
+async function callGraph(deps: SendDeps, body: Record<string, unknown>): Promise<Outcome> {
   const { env } = deps;
   const response = await fetchWithRetry(
     graphUrl(env.graphVersion, `${env.phoneId}/messages`),
@@ -265,9 +411,23 @@ async function callGraph(
     },
     { fetchFn: deps.fetchFn, sleep: deps.sleep },
   );
-  if (!response.ok) return { ok: false, error: await graphErrorReason(response) };
+  if (!response.ok) return { ok: false, error: await graphError(response) };
   const data = await response.json();
+  // Reactions answer with { success: true } on some versions and with a message id on others.
   const id = data?.messages?.[0]?.id;
-  if (typeof id !== "string") return { ok: false, error: "WhatsApp did not return a message id" };
-  return { ok: true, waMessageId: id };
+  if (typeof id !== "string" && body.type !== "reaction") {
+    return { ok: false, error: "WhatsApp did not return a message id" };
+  }
+  return { ok: true, waMessageId: typeof id === "string" ? id : "" };
+}
+
+/** Graph API error body: { error: { message, type, code, error_data: { details }, ... } } */
+async function graphError(response: Response): Promise<string> {
+  try {
+    const err = (await response.json())?.error;
+    if (err) return staffMessage(err.code, err.error_data?.details ?? err.message);
+  } catch {
+    // not JSON
+  }
+  return `WhatsApp API error (HTTP ${response.status})`;
 }

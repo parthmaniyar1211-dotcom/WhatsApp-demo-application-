@@ -70,41 +70,75 @@ function envelope(phoneId, value) {
   };
 }
 
+export const INCOMING_KINDS = ["text", "image", "document", "audio", "video", "sticker", "location", "contacts"];
+
 /**
- * kind: "text" | "image" | "document"
- * hoursAgo: pretend the customer sent it that long ago (default: now)
  * Returns the payload object Meta would send for one incoming message.
+ *   kind:     one of INCOMING_KINDS
+ *   text:     message text, or the caption of an image / video / document
+ *   filename: document file name
+ *   replyTo:  wamid of the message the customer is replying to (quote)
+ *   hoursAgo: pretend the customer sent it that long ago (default: now)
  */
-export function incomingPayload({ kind, phoneId, from, name, id = newMessageId(), text, filename, hoursAgo = 0 }) {
+export function incomingPayload({ kind, phoneId, from, name, id = newMessageId(), text, filename, replyTo, hoursAgo = 0 }) {
   // hoursAgo > 24 makes the conversation look like its 24-hour reply window is closed.
   const sentAt = Math.floor(Date.now() / 1000 - hoursAgo * 3600);
   const message = { from, id, timestamp: String(sentAt), type: kind };
+  const media = (mime, extra = {}) => ({ id: "SIMULATED_MEDIA_ID", mime_type: mime, sha256: "simulated", ...extra });
+  const caption = text ? { caption: text } : {};
   if (kind === "text") {
     message.text = { body: text ?? "Hello from the test harness" };
   } else if (kind === "image") {
-    message.image = { id: "SIMULATED_MEDIA_ID", mime_type: "image/png", sha256: "simulated", ...(text ? { caption: text } : {}) };
+    message.image = media("image/png", caption);
+  } else if (kind === "video") {
+    message.video = media("video/mp4", caption);
+  } else if (kind === "audio") {
+    message.audio = media("audio/ogg; codecs=opus", { voice: true });
+  } else if (kind === "sticker") {
+    message.sticker = media("image/webp", { animated: false });
   } else if (kind === "document") {
-    message.document = {
-      id: "SIMULATED_MEDIA_ID",
-      mime_type: "application/pdf",
-      sha256: "simulated",
-      filename: filename ?? "test-document.pdf",
-      ...(text ? { caption: text } : {}),
+    message.document = media("application/pdf", { filename: filename ?? "test-document.pdf", ...caption });
+  } else if (kind === "location") {
+    message.location = {
+      latitude: 19.076,
+      longitude: 72.8777,
+      name: text ?? "Gateway of India",
+      address: "Apollo Bandar, Colaba, Mumbai",
     };
+  } else if (kind === "contacts") {
+    message.contacts = [{
+      name: { formatted_name: text ?? "Ravi Kumar", first_name: "Ravi" },
+      phones: [{ phone: "+91 98000 00042", wa_id: "919800000042", type: "CELL" }],
+    }];
   } else {
     throw new Error(`Unknown kind: ${kind}`);
   }
+  if (replyTo) message.context = { from: "15550000000", id: replyTo };
   return envelope(phoneId, { contacts: [{ profile: { name }, wa_id: from }], messages: [message] });
 }
 
-/** status: "sent" | "delivered" | "read" | "failed" for an outgoing message id. */
+/** The customer reacts to a message (emoji "" or undefined removes the reaction, like Meta does). */
+export function reactionPayload({ phoneId, from, name, messageId, emoji }) {
+  const message = {
+    from,
+    id: newMessageId(),
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    type: "reaction",
+    reaction: { message_id: messageId, ...(emoji ? { emoji } : {}) },
+  };
+  return envelope(phoneId, { contacts: [{ profile: { name }, wa_id: from }], messages: [message] });
+}
+
+/** status: "sent" | "delivered" | "read" | "played" | "failed" for an outgoing message id. */
 export function statusPayload({ phoneId, to, messageId, status }) {
   const entry = { id: messageId, status, timestamp: String(Math.floor(Date.now() / 1000)), recipient_id: to };
   if (status === "failed") {
     entry.errors = [{
       code: 131026,
       title: "Message undeliverable",
+      message: "Message undeliverable",
       error_data: { details: "Simulated failure from the test harness" },
+      href: "https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes/",
     }];
   }
   return envelope(phoneId, { statuses: [entry] });

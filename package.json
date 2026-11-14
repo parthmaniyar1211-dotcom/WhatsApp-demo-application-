@@ -10,7 +10,7 @@
     "lint": "npm --prefix web run lint",
     "typecheck": "npm --prefix web run typecheck",
     "check:sql": "node scripts/check-sql-sync.mjs",
-    "check:functions": "deno check --no-config supabase/functions/whatsapp-webhook/index.ts supabase/functions/send-whatsapp/index.ts supabase/functions/admin-staff/index.ts && deno lint --no-config supabase/functions",
+    "check:functions": "deno check --no-config supabase/functions/whatsapp-webhook/index.ts supabase/functions/send-whatsapp/index.ts supabase/functions/admin-staff/index.ts supabase/functions/mark-read/index.ts && deno lint --no-config supabase/functions",
     "test:functions": "deno test --no-config supabase/functions/tests/",
     "test:e2e": "npm --prefix web run test:e2e",
     "sim:all": "node scripts/run-all.mjs",
@@ -20,6 +20,8 @@
     "sim:text": "node scripts/simulate-incoming.mjs text",
     "sim:image": "node scripts/simulate-incoming.mjs image",
     "sim:document": "node scripts/simulate-incoming.mjs document",
-    "sim:status": "node scripts/simulate-incoming.mjs status"
+    "sim:status": "node scripts/simulate-incoming.mjs status",
+    "sim": "node scripts/simulate-incoming.mjs",
+    "real-check": "node scripts/real-check.mjs"
   }
 }

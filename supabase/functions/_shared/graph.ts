@@ -47,19 +47,3 @@ export async function fetchWithRetry(
 export function graphUrl(version: string, path: string): string {
   return `https://graph.facebook.com/${version}/${path}`;
 }
-
-/** Turn a Graph API error response into a short reason that is safe to store and show. */
-export async function graphErrorReason(response: Response): Promise<string> {
-  let reason = `WhatsApp API error (HTTP ${response.status})`;
-  try {
-    const data = await response.json();
-    const err = data?.error;
-    if (err) {
-      const detail = err.error_data?.details ?? err.message ?? "";
-      reason = `${err.code ?? response.status}: ${detail}`.slice(0, 300);
-    }
-  } catch {
-    // Not JSON: keep the generic reason.
-  }
-  return reason;
-}

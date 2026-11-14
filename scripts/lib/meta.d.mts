@@ -19,21 +19,31 @@ export function supabaseUrl(): string;
 export function anonKey(): string;
 export function harnessConfig(options?: { needSecret?: boolean; needVerifyToken?: boolean }): HarnessConfig;
 export function newMessageId(): string;
+export type IncomingKind = "text" | "image" | "document" | "audio" | "video" | "sticker" | "location" | "contacts";
+export const INCOMING_KINDS: IncomingKind[];
+export function reactionPayload(input: {
+  phoneId: string;
+  from: string;
+  name: string;
+  messageId: string;
+  emoji?: string;
+}): WebhookPayload;
 export function incomingPayload(input: {
-  kind: "text" | "image" | "document";
+  kind: IncomingKind;
   phoneId: string;
   from: string;
   name: string;
   id?: string;
   text?: string;
   filename?: string;
+  replyTo?: string;
   hoursAgo?: number;
 }): WebhookPayload;
 export function statusPayload(input: {
   phoneId: string;
   to: string;
   messageId: string;
-  status: "sent" | "delivered" | "read" | "failed";
+  status: "sent" | "delivered" | "read" | "played" | "failed";
 }): WebhookPayload;
 export function sign(body: string, secret: string): string;
 export function postWebhook(
