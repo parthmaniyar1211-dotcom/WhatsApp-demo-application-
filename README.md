@@ -162,7 +162,8 @@ Fill in `WA_APP_SECRET`, `WA_VERIFY_TOKEN`, `WA_PHONE_ID` (same values as the Su
 real secrets and returns only pass/fail: secret names and lengths, whether the token is valid and when it expires,
 the phone number, the template, whether `WA_APP_SECRET` is really this Meta app's secret, whether Meta's webhook points
 at this project with the `messages` field, and a signed/unsigned/wrong-signature test of the deployed webhook.
-Call it with `POST /functions/v1/wa-diagnose` and the admin's access token.
+Call it with `POST /functions/v1/wa-diagnose` and the admin's access token. It is read-only unless the body is
+`{"action":"subscribe_waba"}`, which subscribes the app to the business account (`POST /<WABA id>/subscribed_apps`).
 
 ## Commands
 

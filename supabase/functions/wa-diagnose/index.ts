@@ -1,6 +1,9 @@
-// wa-diagnose: read-only health check of the WhatsApp setup, run INSIDE Supabase with the real secrets.
+// wa-diagnose: health check of the WhatsApp setup, run INSIDE Supabase with the real secrets.
 //
-// Admin JWT required. Sends no WhatsApp message and stores nothing. The answer contains only
+// Admin JWT required. By default it is READ-ONLY: it sends no WhatsApp message and stores nothing.
+// One explicit, opt-in action changes Meta's configuration:
+//   { "action": "subscribe_waba" }  ->  POST /<WA_BUSINESS_ACCOUNT_ID>/subscribed_apps (subscribes the app that
+//   owns WA_TOKEN to the business account), then lists the subscribed apps. The answer contains only
 // pass/fail, names, public facts (expiry date, scopes, number's last 4 digits) - never a secret value.
 // Every string in the answer is scrubbed of the configured secret values as a second safety net.
 
@@ -29,6 +32,27 @@ Deno.serve(async (req) => {
 
   const env = waEnv();
   const wabaId = Deno.env.get("WA_BUSINESS_ACCOUNT_ID")?.trim();
+  const requested = await req.json().catch(() => ({})) as { action?: string };
+
+  if (requested.action === "subscribe_waba") {
+    if (!env.token || !wabaId) return json({ error: "WA_TOKEN or WA_BUSINESS_ACCOUNT_ID is not set" }, 500, corsHeaders);
+    const call = (method: string) =>
+      fetch(`https://graph.facebook.com/${env.graphVersion}/${wabaId}/subscribed_apps`, { method, headers: { Authorization: `Bearer ${env.token}` } })
+        .then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) as Meta }));
+    const before = await call("GET");
+    const post = await call("POST");
+    const after = await call("GET");
+    const names = (r: { body: Meta }) => (r.body?.data ?? []).map((a: Meta) => a.whatsapp_business_api_data?.name ?? a.whatsapp_business_api_data?.id ?? a.id);
+    const clean = (t: string) => (env.token ? t.split(env.token).join("[hidden]") : t).slice(0, 300);
+    return json({
+      waba: wabaId,
+      subscribed_before: names(before),
+      post_status: post.status,
+      post_result: post.status === 200 ? post.body : clean(`Meta code ${post.body?.error?.code ?? "?"}: ${post.body?.error?.message ?? "unknown"}`),
+      subscribed_after: names(after),
+    }, 200, corsHeaders);
+  }
+
   const secrets = [env.token, env.appSecret, env.verifyToken].filter((s): s is string => !!s && s.length >= 4);
   const scrub = (text: string) => secrets.reduce((out, s) => out.split(s).join("[hidden]"), text).slice(0, 300);
   const rows: Row[] = [];
