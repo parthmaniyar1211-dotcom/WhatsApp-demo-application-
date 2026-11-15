@@ -183,6 +183,7 @@ Run from the repository root.
 | `npm run sim -- reaction <wa_message_id> 👍` | the customer reacts (no emoji = removes the reaction) |
 | `npm run sim -- status <wa_message_id> delivered` | a delivery status: `sent`, `delivered`, `read`, `played`, `failed` |
 | `npm run real-check` | live check of the deployed webhook and your real token (needs `~/wa-secrets.env`) |
+| `npm run test:sql` | database tests for message deletion (local database only, rolled back) |
 | `npm run test:e2e` | Playwright test against your Supabase project (first time: `cd web && npx playwright install chromium`) |
 
 ## Hosting the web app
@@ -236,7 +237,7 @@ in the root `.env`, then run `npm run sim:all` and `npm run test:e2e`.
 | Photos, videos, stickers, documents, locations, contacts | preview, player, file card with name and size, map link |
 | Long chats | date separators, grouped messages, unread divider, endless scrolling, "scroll to latest" button |
 | Search | in the sidebar: chats (name, number, label) and message text in all chats; in a chat: the magnifier |
-| Starred / Delete for me | private to you. Deleting for me never deletes anything for the other person |
+| Starred / Delete for me | private to you. Delete for me asks for confirmation, hides the message only in your view (soft delete, Undo available) and never touches WhatsApp or the stored media. **Delete for everyone is not available**: the Cloud API has no call for it |
 | Quick replies | type `/` in the reply box; manage them under Settings (gear) → Quick replies |
 | Contact info | the ⓘ button: saved name (editable), number, starred messages, messages deleted for me |
 | Notifications, sound, dark mode | Settings (gear), remembered per browser |

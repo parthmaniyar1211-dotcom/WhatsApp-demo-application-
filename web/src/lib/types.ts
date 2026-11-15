@@ -94,3 +94,15 @@ export interface QuickReply {
   shortcut: string;
   body: string;
 }
+
+/** The newest message of a chat that this user has not deleted (for the chat list preview). */
+export interface VisibleLast {
+  conversation_id: string;
+  message_id: string;
+  direction: "in" | "out";
+  type: MessageType;
+  body: string | null;
+  media_filename: string | null;
+  media_voice: boolean;
+  created_at: string;
+}

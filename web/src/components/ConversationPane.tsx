@@ -20,12 +20,16 @@ import { Lightbox, MessageBubble } from "./MessageBubble";
 import { Composer, type ComposerHandle } from "./Composer";
 import { InfoPanel } from "./InfoPanel";
 import { Icon } from "./Icons";
+import { DeleteForEveryoneDialog, DeleteForMeDialog } from "./MessageDialogs";
 
 interface Props {
   conversation: Conversation;
   me: Staff;
   flags: Flags;
   setFlag: (messageId: string, patch: Partial<{ starred: boolean; hidden: boolean }>) => Promise<void>;
+  /** Delete for me / Undo: resolve once the server confirmed. */
+  deleteForMe: (messageId: string) => Promise<void>;
+  restoreForMe: (messageId: string) => Promise<void>;
   quickReplies: QuickReply[];
   onManageQuickReplies: () => void;
   /** Unread messages at the moment the chat was opened (for the "unread" divider). */
@@ -37,7 +41,7 @@ interface Props {
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
 export function ConversationPane(props: Props) {
-  const { conversation, me, flags, setFlag } = props;
+  const { conversation, me, flags, setFlag, deleteForMe, restoreForMe } = props;
   const stream = useMessages(conversation.id);
   const now = useNow(30_000);
   const visible = useVisible();
@@ -52,7 +56,10 @@ export function ConversationPane(props: Props) {
     return map;
   }, [stream.messages]);
 
-  const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; kind?: "success" | "error"; undo?: () => void } | null>(null);
+  // Delete for me: the message waiting for confirmation; Delete for everyone: the message the explanation is about.
+  const [deleting, setDeleting] = useState<{ message: Message; busy: boolean; error: string | null } | null>(null);
+  const [everyoneInfo, setEveryoneInfo] = useState<Message | null>(null);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -213,17 +220,13 @@ export function ConversationPane(props: Props) {
     onToggleStar: (message: Message) => {
       setFlag(message.id, { starred: !flags[message.id]?.starred }).catch((err) => setNotice({ text: errorMessage(err) }));
     },
-    onHide: (message: Message) => {
-      setFlag(message.id, { hidden: true }).then(
-        () =>
-          setNotice({
-            text: "Deleted for you only. WhatsApp does not delete it for the other person.",
-            undo: () => {
-              void setFlag(message.id, { hidden: false });
-              setNotice(null);
-            },
-          }),
-        (err) => setNotice({ text: errorMessage(err) }),
+    onDeleteForMe: (message: Message) => setDeleting({ message, busy: false, error: null }),
+    onDeleteForEveryone: (message: Message) => setEveryoneInfo(message),
+    onCopy: (message: Message, text: string) => {
+      void message;
+      (navigator.clipboard?.writeText(text) ?? Promise.reject(new Error("Copy is not available in this browser."))).then(
+        () => setNotice({ text: "Copied to the clipboard.", kind: "success" }),
+        () => setNotice({ text: "Could not copy. Allow clipboard access for this site.", kind: "error" }),
       );
     },
     onJumpToQuoted: (waMessageId: string) => {
@@ -233,6 +236,38 @@ export function ConversationPane(props: Props) {
     onOpenImage: setLightbox,
     onMediaLoad: scrollToBottom,
   };
+
+  async function confirmDelete() {
+    if (!deleting || deleting.busy) return;
+    const { message } = deleting;
+    setDeleting({ message, busy: true, error: null });
+    try {
+      await deleteForMe(message.id); // the message disappears only after the server confirmed
+      setDeleting(null);
+      setNotice({
+        text: "Message deleted.",
+        kind: "success",
+        undo: () => {
+          restoreForMe(message.id).then(
+            () => setNotice({ text: "Message restored.", kind: "success" }),
+            (err) => setNotice({ text: `Could not restore the message: ${errorMessage(err)}`, kind: "error" }),
+          );
+        },
+      });
+    } catch (err) {
+      setDeleting({ message, busy: false, error: `Could not delete the message: ${errorMessage(err)}` });
+    }
+  }
+
+  // A success notice fades away by itself (an error stays until dismissed).
+  useEffect(() => {
+    if (notice?.kind !== "success") return;
+    const timer = setTimeout(() => setNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // Deleting the message you are replying to cancels the reply.
+  const activeReply = replyTo && !flags[replyTo.id]?.hidden ? replyTo : null;
 
   // --- Drag and drop a file onto the chat
   const [dragging, setDragging] = useState(false);
@@ -332,7 +367,7 @@ export function ConversationPane(props: Props) {
         )}
 
         {notice && (
-          <div className="banner info" role="status" data-testid="chat-notice">
+          <div className={`banner ${notice.kind === "error" ? "error" : "info"}`} role={notice.kind === "error" ? "alert" : "status"} data-testid="chat-notice">
             <span>{notice.text}</span>
             {notice.undo && (
               <button type="button" className="button small" onClick={notice.undo}>
@@ -367,8 +402,22 @@ export function ConversationPane(props: Props) {
               </div>
             )}
             {stream.loaded && messages.length === 0 && (
-              <div className="empty">
-                <p className="muted">No messages in this conversation yet.</p>
+              <div className="empty" data-testid="empty-chat">
+                {stream.messages.length > 0 ? (
+                  <>
+                    <p className="muted">You deleted all the messages loaded in this chat.</p>
+                    <button
+                      type="button"
+                      className="button small"
+                      data-testid="show-deleted"
+                      onClick={() => stream.messages.forEach((m) => void restoreForMe(m.id))}
+                    >
+                      Show them again
+                    </button>
+                  </>
+                ) : (
+                  <p className="muted">No messages in this conversation yet.</p>
+                )}
               </div>
             )}
             {stream.hasEarlier && (
@@ -405,6 +454,9 @@ export function ConversationPane(props: Props) {
                     quoted={
                       message.reply_to_wa_message_id ? (byWaId.get(message.reply_to_wa_message_id) ?? null) : undefined
                     }
+                    quotedDeleted={Boolean(
+                      message.reply_to_wa_message_id && flags[byWaId.get(message.reply_to_wa_message_id)?.id ?? ""]?.hidden,
+                    )}
                     starred={Boolean(flags[message.id]?.starred)}
                     highlighted={highlighted === message.id}
                     windowOpen={windowOpen}
@@ -447,7 +499,7 @@ export function ConversationPane(props: Props) {
           windowOpen={windowOpen}
           customerName={name}
           quickReplies={props.quickReplies}
-          replyTo={replyTo}
+          replyTo={activeReply}
           onCancelReply={() => setReplyTo(null)}
           onManageQuickReplies={props.onManageQuickReplies}
           onSent={(message) => {
@@ -467,10 +519,28 @@ export function ConversationPane(props: Props) {
             if (window.matchMedia("(max-width: 1099px)").matches) setInfoOpen(false);
             void jumpTo(id);
           }}
-          onUnhide={(ids) => ids.forEach((id) => void setFlag(id, { hidden: false }))}
+          onUnhide={(ids) => ids.forEach((id) => void restoreForMe(id))}
         />
       )}
       {lightbox && <Lightbox url={lightbox} onClose={() => setLightbox(null)} />}
+      {deleting && (
+        <DeleteForMeDialog
+          busy={deleting.busy}
+          error={deleting.error}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => void confirmDelete()}
+        />
+      )}
+      {everyoneInfo && (
+        <DeleteForEveryoneDialog
+          onClose={() => setEveryoneInfo(null)}
+          onDeleteForMe={() => {
+            const message = everyoneInfo;
+            setEveryoneInfo(null);
+            setDeleting({ message, busy: false, error: null });
+          }}
+        />
+      )}
     </div>
   );
 }

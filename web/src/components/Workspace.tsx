@@ -74,6 +74,8 @@ export function Workspace({ me }: { me: Staff }) {
               me={me}
               flags={inbox.flags}
               setFlag={inbox.setFlag}
+              deleteForMe={inbox.deleteForMe}
+              restoreForMe={inbox.restoreForMe}
               quickReplies={quickReplies}
               onManageQuickReplies={() => setDialog("quick")}
               initialUnread={openUnread}

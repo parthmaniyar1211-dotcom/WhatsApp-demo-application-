@@ -2827,3 +2827,77 @@ select {
 .dialog-body .notice {
   align-self: stretch;
 }
+
+/* ---------- Message deletion ---------- */
+
+.popover [role="menuitem"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Delete for everyone: unavailable, but clickable so the reason can be shown (also on touch screens). */
+.popover [role="menuitem"].unavailable {
+  opacity: 0.5;
+}
+
+.popover [role="menuitem"].unavailable:hover {
+  background: transparent;
+}
+
+.dialog.narrow {
+  max-width: 420px;
+}
+
+.confirm-body {
+  align-items: stretch;
+  gap: 14px;
+}
+
+.confirm-body h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+
+.confirm-body p {
+  line-height: 1.45;
+}
+
+.confirm-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.quote.deleted .quote-text,
+.chat-preview.deleted {
+  font-style: italic;
+}
+
+.banner.error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.banner.error span {
+  flex: 1;
+}
+
+@media (max-width: 767px) {
+  .dialog-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .dialog.narrow {
+    max-width: none;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

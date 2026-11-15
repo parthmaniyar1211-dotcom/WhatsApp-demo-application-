@@ -89,6 +89,7 @@ export async function rest<T = Record<string, unknown>>(pathAndQuery: string): P
 export interface MessageRecord {
   id: string;
   wa_message_id: string | null;
+  direction: string;
   status: string;
   type: string;
   body: string | null;
@@ -172,4 +173,38 @@ export async function openMessageMenu(bubble: import("@playwright/test").Locator
 
 export function statusOf(bubble: import("@playwright/test").Locator) {
   return bubble.getByTestId("message-status");
+}
+
+/** The caller's own flag row for a message (starred / hidden), or undefined. */
+export async function flagOf(messageId: string) {
+  const rows = await rest<{ message_id: string; hidden: boolean; starred: boolean; hidden_at: string | null }>(
+    `message_flags?select=message_id,hidden,starred,hidden_at&message_id=eq.${messageId}`,
+  );
+  return rows[0];
+}
+
+/** True when the stored file can still be served through a fresh signed URL (the media is intact). */
+export async function fileStillServed(path: string): Promise<boolean> {
+  const token = await staffLogin();
+  const sign = await fetch(`${supabaseUrl()}/storage/v1/object/sign/files/${path}`, {
+    method: "POST",
+    headers: { apikey: anonKey(), Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ expiresIn: 60 }),
+  });
+  if (!sign.ok) return false;
+  const { signedURL } = (await sign.json()) as { signedURL: string };
+  const file = await fetch(`${supabaseUrl()}/storage/v1${signedURL}`);
+  return file.ok && (await file.arrayBuffer()).byteLength > 0;
+}
+
+/** Calls a REST/RPC endpoint exactly like the app would, with or without a login. */
+export async function apiCall(path: string, body: unknown, auth: "owner" | "anon" | "forged") {
+  const owner = auth === "owner" ? await staffLogin() : null;
+  const bearer = auth === "owner" ? owner : auth === "forged" ? "not.a.valid.jwt" : anonKey();
+  const response = await fetch(`${supabaseUrl()}/rest/v1/${path}`, {
+    method: "POST",
+    headers: { apikey: anonKey(), Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, json: (await response.json().catch(() => ({}))) as { code?: string; message?: string } };
 }

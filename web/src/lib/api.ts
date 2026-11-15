@@ -2,7 +2,7 @@
 
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-import type { Conversation, Message, MessageFlag, QuickReply } from "./types";
+import type { Conversation, Message, MessageFlag, QuickReply, VisibleLast } from "./types";
 
 /** The single login of this app. Only the password is typed; change it under Settings. */
 export const OWNER_EMAIL = "admin1@company.demo";
@@ -156,6 +156,24 @@ export async function setMessageFlags(messageId: string, starred: boolean, hidde
     p_hidden: hidden,
   });
   rpcError(error);
+}
+
+/** Deletes a message for this user only (soft delete: the message and its media stay, WhatsApp is not touched). */
+export async function deleteMessageForMe(messageId: string): Promise<void> {
+  const { error } = await supabase.rpc("delete_message_for_me", { p_message_id: messageId });
+  rpcError(error);
+}
+
+export async function restoreMessageForMe(messageId: string): Promise<void> {
+  const { error } = await supabase.rpc("restore_message_for_me", { p_message_id: messageId });
+  rpcError(error);
+}
+
+/** Newest message per chat that this user has not deleted. Null when the server does not have the function yet. */
+export async function loadVisibleLastMessages(): Promise<VisibleLast[] | null> {
+  const { data, error } = await supabase.rpc("visible_last_messages");
+  if (error) return null;
+  return (data ?? []) as VisibleLast[];
 }
 
 export async function loadQuickReplies(): Promise<QuickReply[]> {

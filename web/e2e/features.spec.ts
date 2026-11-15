@@ -356,7 +356,7 @@ test("starred messages and delete for me", async ({ page }) => {
   await expect(address.getByTestId("star-mark")).toBeVisible();
   if (await page.getByTestId("filter-starred").isHidden()) await page.getByRole("link", { name: "Back to chats" }).click();
   await page.getByTestId("filter-starred").click();
-  const starred = page.getByTestId("starred-item").filter({ hasText: "12 Lake Road" });
+  const starred = page.getByTestId("starred-item").filter({ hasText: "12 Lake Road" }).filter({ hasText: customer.name });
   await expect(starred).toContainText(customer.name);
   await starred.click();
   await expect(address).toBeInViewport();
@@ -369,14 +369,17 @@ test("starred messages and delete for me", async ({ page }) => {
   await openMessageMenu(ignore);
   await expect(page.getByText("WhatsApp does not let a business edit or delete a sent message.")).toBeVisible();
   await page.getByRole("menuitem", { name: "Delete for me" }).click();
+  await expect(ignore).toHaveCount(1); // not deleted until confirmed
+  await page.getByTestId("delete-confirm").click();
   await expect(ignore).toHaveCount(0);
-  await expect(page.getByTestId("chat-notice")).toContainText("Deleted for you only. WhatsApp does not delete it for the other person.");
-  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByTestId("chat-notice")).toContainText("Message deleted.");
+  await page.getByTestId("chat-notice").getByRole("button", { name: "Undo" }).click();
   await expect(ignore).toHaveCount(1);
 
   // Delete again and bring it back from the contact info panel.
   await openMessageMenu(ignore);
   await page.getByRole("menuitem", { name: "Delete for me" }).click();
+  await page.getByTestId("delete-confirm").click();
   await expect(ignore).toHaveCount(0);
   expect((await messagesOf(customer.from)).some((m) => m.body === "Please ignore this one")).toBe(true); // not deleted
   await page.reload();

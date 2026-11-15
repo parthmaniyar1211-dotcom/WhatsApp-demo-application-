@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
-import type { Conversation, Message, MessageFlag, Staff } from "../lib/types";
+import type { Conversation, Message, MessageFlag, Staff, VisibleLast } from "../lib/types";
 import { customerLabel, errorMessage, messageSummary } from "../lib/format";
-import { loadFlags, setMessageFlags } from "../lib/api";
+import { deleteMessageForMe, loadFlags, loadVisibleLastMessages, restoreMessageForMe, setMessageFlags } from "../lib/api";
 import { announceMessage } from "../lib/notify";
 import { type Change, type LiveStatus, useLiveChannel } from "./useLiveChannel";
 
@@ -28,14 +28,25 @@ export interface Inbox {
   conversations: Conversation[];
   unread: Record<string, number>;
   staff: Record<string, Staff>;
-  /** This staff member's starred / hidden messages, by message id. */
+  /** This user's starred / deleted-for-me messages, by message id. */
   flags: Flags;
+  /**
+   * The newest message of each chat that this user has NOT deleted, by conversation id.
+   * Null while unavailable (server without the function): the list then falls back to the server preview.
+   */
+  previews: Record<string, VisibleLast> | null;
+  /** Chats whose newest message changed after the previews were loaded: show the server preview until refreshed. */
+  previewDirty: Set<string>;
   loaded: boolean;
   error: string | null;
   live: LiveStatus;
   reload: () => void;
   markRead: (conversationId: string) => void;
   setFlag: (messageId: string, patch: Partial<{ starred: boolean; hidden: boolean }>) => Promise<void>;
+  /** Delete for me: resolves only after the server confirmed, then the message disappears. */
+  deleteForMe: (messageId: string) => Promise<void>;
+  /** Undo / show again. */
+  restoreForMe: (messageId: string) => Promise<void>;
 }
 
 /**
@@ -47,6 +58,9 @@ export function useInbox(userId: string, openId: string | null, onOpenConversati
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [staff, setStaff] = useState<Record<string, Staff>>({});
   const [flags, setFlags] = useState<Flags>({});
+  const [previews, setPreviews] = useState<Record<string, VisibleLast> | null>(null);
+  const [previewDirty, setPreviewDirty] = useState<Set<string>>(new Set());
+  const dirtyRef = useRef<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,6 +85,20 @@ export function useInbox(userId: string, openId: string | null, onOpenConversati
     setUnread(counts);
   }, []);
 
+  const loadPreviews = useCallback(async () => {
+    const dirtyAtStart = new Set(dirtyRef.current);
+    const rows = await loadVisibleLastMessages();
+    setPreviews(rows ? Object.fromEntries(rows.map((r) => [r.conversation_id, r])) : null);
+    // Chats that changed while this request was running stay dirty until the next refresh.
+    for (const id of dirtyAtStart) dirtyRef.current.delete(id);
+    setPreviewDirty(new Set(dirtyRef.current));
+  }, []);
+
+  const markDirty = useCallback((conversationId: string) => {
+    dirtyRef.current.add(conversationId);
+    setPreviewDirty(new Set(dirtyRef.current));
+  }, []);
+
   const reload = useCallback(async () => {
     pending.current.loads++;
     const [conversationResult, staffResult, flagRows] = await Promise.all([
@@ -78,6 +106,7 @@ export function useInbox(userId: string, openId: string | null, onOpenConversati
       supabase.from("staff").select("*"),
       loadFlags().catch(() => null),
       loadUnread(),
+      loadPreviews(),
     ]);
     // Replay everything that arrived since the oldest reload still in flight started.
     const queued = [...pending.current.changes];
@@ -97,20 +126,32 @@ export function useInbox(userId: string, openId: string | null, onOpenConversati
     }
     setError(null);
     setLoaded(true);
-  }, [loadUnread]);
+  }, [loadUnread, loadPreviews]);
 
   const onChange = useCallback(
     (change: Change) => {
       if (change.table === "conversations") {
         if (pending.current.loads > 0) pending.current.changes.push(change);
         setConversations((list) => applyConversationChange(list, change));
+        if (change.eventType !== "DELETE") {
+          // The newest message of this chat changed (a message arrived or was sent): refresh its preview.
+          markDirty((change.new as { id: string }).id);
+          clearTimeout(unreadTimer.current);
+          unreadTimer.current = setTimeout(() => {
+            void loadUnread();
+            void loadPreviews();
+          }, 250);
+        }
       } else if (change.table === "wa_messages" && change.eventType === "INSERT") {
         const message = change.new as unknown as Message;
         if (message.direction !== "in") return;
         // A new incoming message changes the unread counts. Ask the server (debounced)
         // instead of counting locally, so the badge can never drift.
         clearTimeout(unreadTimer.current);
-        unreadTimer.current = setTimeout(() => void loadUnread(), 250);
+        unreadTimer.current = setTimeout(() => {
+          void loadUnread();
+          void loadPreviews();
+        }, 250);
 
         // Sound / browser notification, unless the user is looking at that chat right now.
         const { conversations: known, openId: open, onOpenConversation: openConversation } = latest.current;
@@ -124,7 +165,7 @@ export function useInbox(userId: string, openId: string | null, onOpenConversati
         });
       }
     },
-    [loadUnread],
+    [loadUnread, loadPreviews, markDirty],
   );
 
   useEffect(() => () => clearTimeout(unreadTimer.current), []);
@@ -154,5 +195,26 @@ export function useInbox(userId: string, openId: string | null, onOpenConversati
     }
   }, []);
 
-  return { conversations, unread, staff, flags, loaded, error, live, reload, markRead, setFlag };
+  const deleteForMe = useCallback(
+    async (messageId: string) => {
+      await deleteMessageForMe(messageId);
+      // Only after the server said yes: hide it here and refresh the chat-list preview.
+      setFlags((all) => ({ ...all, [messageId]: { starred: all[messageId]?.starred ?? false, hidden: true } }));
+      void loadPreviews();
+    },
+    [loadPreviews],
+  );
+
+  const restoreForMe = useCallback(
+    async (messageId: string) => {
+      await restoreMessageForMe(messageId);
+      setFlags((all) => ({ ...all, [messageId]: { starred: all[messageId]?.starred ?? false, hidden: false } }));
+      void loadPreviews();
+    },
+    [loadPreviews],
+  );
+
+  return {
+    conversations, unread, staff, flags, previews, previewDirty, loaded, error, live, reload, markRead, setFlag, deleteForMe, restoreForMe,
+  };
 }

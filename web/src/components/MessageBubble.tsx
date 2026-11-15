@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Message } from "../lib/types";
 import { signedFileUrl } from "../lib/api";
-import { formatBytes, formatTime, messageSummary } from "../lib/format";
+import { copyableText, formatBytes, formatTime, messageSummary } from "../lib/format";
 import { REACTION_EMOJIS } from "../lib/emoji";
 import { Icon, Ticks } from "./Icons";
 
@@ -9,7 +9,11 @@ export interface BubbleActions {
   onReply: (message: Message) => void;
   onReact: (message: Message, emoji: string) => void;
   onToggleStar: (message: Message) => void;
-  onHide: (message: Message) => void;
+  /** Opens the "Delete message?" confirmation (nothing is deleted yet). */
+  onDeleteForMe: (message: Message) => void;
+  /** Opens the explanation that Delete for everyone is not supported by the Cloud API. */
+  onDeleteForEveryone: (message: Message) => void;
+  onCopy: (message: Message, text: string) => void;
   onJumpToQuoted: (waMessageId: string) => void;
   onOpenImage: (url: string) => void;
   onMediaLoad: () => void;
@@ -22,6 +26,8 @@ interface Props extends BubbleActions {
   customerName: string;
   /** The quoted message: undefined = this is not a reply, null = the quoted message is not loaded. */
   quoted: Message | null | undefined;
+  /** The quoted message exists but this user deleted it: its content must not be shown. */
+  quotedDeleted?: boolean;
   starred: boolean;
   highlighted: boolean;
   /** Replies and reactions need an open 24-hour window. */
@@ -29,7 +35,7 @@ interface Props extends BubbleActions {
 }
 
 export function MessageBubble(props: Props) {
-  const { message, grouped, customerName, quoted, starred, highlighted, windowOpen } = props;
+  const { message, grouped, customerName, quoted, quotedDeleted, starred, highlighted, windowOpen } = props;
   const outgoing = message.direction === "out";
   const hasFile = Boolean(message.media_path);
   const isMedia = ["image", "video", "audio", "document", "sticker"].includes(message.type);
@@ -52,15 +58,21 @@ export function MessageBubble(props: Props) {
         {quoted !== undefined && (
           <button
             type="button"
-            className="quote"
+            className={`quote ${quotedDeleted ? "deleted" : ""}`}
             data-testid="quote"
-            disabled={!quoted}
+            disabled={!quoted || quotedDeleted}
             onClick={() => quoted?.wa_message_id && props.onJumpToQuoted(quoted.wa_message_id)}
           >
             <span className="quote-author">
-              {quoted ? (quoted.direction === "out" ? "You" : customerName) : "Earlier message"}
+              {quotedDeleted ? "Message deleted" : quoted ? (quoted.direction === "out" ? "You" : customerName) : "Earlier message"}
             </span>
-            <span className="quote-text">{quoted ? messageSummary(quoted) || "Message" : "Not loaded. Scroll up to see it."}</span>
+            <span className="quote-text">
+              {quotedDeleted
+                ? "You deleted this message"
+                : quoted
+                  ? messageSummary(quoted) || "Message"
+                  : "Not loaded. Scroll up to see it."}
+            </span>
           </button>
         )}
 
@@ -184,12 +196,13 @@ export function MessageBubble(props: Props) {
   );
 }
 
-/** The "⋯" menu of a message: react, reply, star, copy, hide. */
-function MessageMenu({ message, starred, windowOpen, onReply, onReact, onToggleStar, onHide }: Props) {
+/** The three-dot menu of a message: react, reply, copy, star, delete for me, delete for everyone (not supported). */
+function MessageMenu({ message, starred, windowOpen, onReply, onReact, onToggleStar, onDeleteForMe, onDeleteForEveryone, onCopy }: Props) {
   const [open, setOpen] = useState(false);
   const [upward, setUpward] = useState(false); // open above the button when it is low on the screen
   const root = useRef<HTMLDivElement>(null);
   const canAnswer = Boolean(message.wa_message_id) && windowOpen;
+  const copyText = copyableText(message);
 
   useEffect(() => {
     if (!open) return;
@@ -224,7 +237,7 @@ function MessageMenu({ message, starred, windowOpen, onReply, onReact, onToggleS
           setOpen((value) => !value);
         }}
       >
-        <Icon name="down" size={18} />
+        <Icon name="more" size={18} />
       </button>
       {open && (
         <div className={`popover ${upward ? "upward" : ""}`} role="menu">
@@ -248,16 +261,32 @@ function MessageMenu({ message, starred, windowOpen, onReply, onReact, onToggleS
               <Icon name="reply" size={16} /> Reply
             </button>
           )}
+          <button
+            type="button"
+            role="menuitem"
+            disabled={copyText === null}
+            title={copyText === null ? "There is no text to copy" : undefined}
+            data-testid="menu-copy"
+            onClick={run(() => copyText !== null && onCopy(message, copyText))}
+          >
+            <Icon name="copy" size={16} /> Copy message
+          </button>
           <button type="button" role="menuitem" onClick={run(() => onToggleStar(message))}>
             <Icon name={starred ? "starFilled" : "star"} size={16} /> {starred ? "Unstar" : "Star"}
           </button>
-          {message.body && (
-            <button type="button" role="menuitem" onClick={run(() => void navigator.clipboard?.writeText(message.body ?? ""))}>
-              <Icon name="copy" size={16} /> Copy text
-            </button>
-          )}
-          <button type="button" role="menuitem" onClick={run(() => onHide(message))}>
+          <button type="button" role="menuitem" data-testid="menu-delete-me" onClick={run(() => onDeleteForMe(message))}>
             <Icon name="trash" size={16} /> Delete for me
+          </button>
+          {/* Not available: the Cloud API has no call to delete a sent message. Clicking explains why; nothing is sent. */}
+          <button
+            type="button"
+            role="menuitem"
+            className="unavailable"
+            aria-disabled="true"
+            data-testid="menu-delete-everyone"
+            onClick={run(() => onDeleteForEveryone(message))}
+          >
+            <Icon name="trash" size={16} /> Delete for everyone
           </button>
           {!windowOpen && Boolean(message.wa_message_id) && (
             <p className="menu-note">Reply and react need an open 24-hour window.</p>

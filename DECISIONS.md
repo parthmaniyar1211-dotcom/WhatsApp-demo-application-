@@ -237,3 +237,21 @@ Not changed: all backend behaviour from parts 1 and 2 (webhook, send, mark-read,
 | `WA_APP_SECRET` is verified against Meta with the app access token `<app id>\|<secret>` | Meta accepts that pair only if the secret is the app's real one. Comparing against a local copy would prove nothing. |
 | The outgoing path was tested by sending `hello_world` to a number that cannot be on the allowed list | A real Graph call without messaging a person: Meta answers 131030, which shows the token, phone ID and `WA_DRY_RUN=false` are working and that the error mapping reaches the user. The temporary test chat was deleted again. |
 | `wa-diagnose` got one opt-in write action, `{"action":"subscribe_waba"}` | The business account was not subscribed to the app, and the token that can fix it lives only in Supabase secrets. The action runs exactly one Meta call, only for `WA_BUSINESS_ACCOUNT_ID`, and returns the before/after list of subscribed apps. Without the body the function stays read-only. |
+
+
+---
+
+# Part 5: Delete for me / Delete for everyone
+
+| Decision | Why |
+| --- | --- |
+| **Delete for everyone is not implemented; the menu item is visible, marked unavailable, and opens an explanation** | Meta's documentation (read through search of developers.facebook.com; the site itself is blocked here) shows no Cloud API call to delete or unsend a message a business sent. `revoke` / `edit` webhooks exist only as notifications for coexistence setups (WhatsApp Business app + API). No unofficial API is used and no deletion is simulated. The item stays clickable (`aria-disabled`) so the reason is readable on touch screens too. |
+| Delete for me = soft delete in `message_flags` (the existing per-user table), through `delete_message_for_me()` / `restore_message_for_me()` | The message, its status, webhook references and media are never touched. Another user's view cannot be affected: the user comes from the login, never from the request. |
+| The chat-list preview is derived per user by `visible_last_messages()`, not stored in a shared column | A shared `conversations.last_message_id` would show one user's deleted message (or hide another's) to everybody. The RPC is `security invoker`, so row level security applies. Until it is refreshed after a new message, the server preview is used (a new message cannot be one the user deleted). If the function does not exist yet on the server, the list falls back to the server preview, so the frontend can safely be deployed before or after the migration. |
+| Starred lists, the info panel and quotes ignore deleted messages | They were the three places where deleted text still showed. A quote of a deleted message reads "You deleted this message". |
+| Deleting is not optimistic: the message disappears only after the server confirmed | The dialog shows "Deleting…", and an error stays inside the dialog with "Try again", so nothing is hidden that is not saved. |
+| Undo stays; a star set before deleting is kept | `restore_message_for_me()` only clears the hidden state and removes empty rows. |
+| `set_message_flags()` kept for the APK, now keeps `hidden_at` consistent | Backward compatible. |
+| Media files are never deleted | Deleting for me does not touch storage at all (each message owns its own file path anyway). |
+
+Defects found by the new tests while building this: a new chat briefly showed "You deleted all messages" instead of its first message (the preview was not refreshed on a new message; fixed by marking changed chats and using the server preview until refreshed).

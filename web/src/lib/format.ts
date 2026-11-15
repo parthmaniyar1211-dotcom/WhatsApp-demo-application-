@@ -1,4 +1,4 @@
-import type { Conversation, Message } from "./types";
+import type { Conversation, Message, MessageLocation } from "./types";
 
 export const WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -97,4 +97,65 @@ export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "object" && err !== null && "message" in err) return String((err as { message: unknown }).message);
   return "Something went wrong";
+}
+
+/** The chat-list line for a message. Mirrors the server's message_preview(), so both look the same. */
+export function previewText(m: Pick<Message, "type" | "body" | "media_filename">): string {
+  const withBody = (label: string) => (m.body ? `${label}: ${m.body}` : label);
+  let text: string;
+  switch (m.type) {
+    case "image":
+      text = withBody("Photo");
+      break;
+    case "video":
+      text = withBody("Video");
+      break;
+    case "audio":
+      text = "Voice message";
+      break;
+    case "sticker":
+      text = "Sticker";
+      break;
+    case "location":
+      text = withBody("Location");
+      break;
+    case "contacts":
+      text = withBody("Contact");
+      break;
+    case "document":
+      text = m.media_filename ? `Document: ${m.media_filename}` : "Document";
+      break;
+    case "template":
+      text = withBody("Template");
+      break;
+    default:
+      text = m.body ?? "";
+  }
+  return text.slice(0, 120);
+}
+
+/** What "Copy message" copies, or null when there is nothing to copy (a photo without a caption, a voice note ...). */
+export function copyableText(m: Pick<Message, "type" | "body" | "media_filename" | "location" | "contacts">): string | null {
+  const text = (value: string | null | undefined) => (value && value.trim() ? value : null);
+  switch (m.type) {
+    case "text":
+    case "template":
+    case "interactive":
+    case "button":
+    case "other":
+      return text(m.body);
+    case "image":
+    case "video":
+      return text(m.body); // the caption
+    case "document":
+      return text(m.body) ?? text(m.media_filename);
+    case "location": {
+      const l: MessageLocation | null = m.location;
+      return l ? `${text(m.body) ? `${m.body}\n` : ""}https://www.google.com/maps/search/?api=1&query=${l.latitude},${l.longitude}` : text(m.body);
+    }
+    case "contacts":
+      return m.contacts?.length ? m.contacts.map((c) => [c.name, ...c.phones].join(" ")).join("\n") : text(m.body);
+    default:
+      return null; // audio, sticker
+  }
 }

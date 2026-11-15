@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Inbox } from "../hooks/useInbox";
 import type { Message } from "../lib/types";
 import { loadMessagesByIds, searchMessages } from "../lib/api";
-import { customerLabel, formatListTime, formatPhone, messageSummary } from "../lib/format";
+import { customerLabel, formatListTime, formatPhone, messageSummary, previewText } from "../lib/format";
 import { navigate } from "../hooks/useBrowserState";
 import { Avatar } from "./Avatar";
 import { Icon } from "./Icons";
@@ -56,7 +56,7 @@ export function ConversationList({ inbox, openId, onNewChat, menu }: Props) {
 
   // Starred messages (all chats).
   const starredKey = Object.entries(inbox.flags)
-    .filter(([, flag]) => flag.starred)
+    .filter(([, flag]) => flag.starred && !flag.hidden)
     .map(([id]) => id)
     .join(",");
   const [starred, setStarred] = useState<{ key: string; rows: Message[] } | null>(null);
@@ -71,6 +71,18 @@ export function ConversationList({ inbox, openId, onNewChat, menu }: Props) {
       cancelled = true;
     };
   }, [starredKey, filter]);
+
+  // The chat-list line is derived per user from the newest message THEY have not deleted,
+  // so a deleted message never shows up as a preview.
+  const previewFor = (c: Inbox["conversations"][number]): { text: string; time: string; deleted: boolean } => {
+    // A chat that just changed shows the server's preview (its newest message is new, so it cannot be one that was
+    // deleted) until the per-user preview has been refreshed.
+    if (inbox.previewDirty.has(c.id)) return { text: c.last_message_preview || formatPhone(c.wa_id), time: c.last_message_at, deleted: false };
+    const visibleLast = inbox.previews?.[c.id];
+    if (visibleLast) return { text: previewText(visibleLast), time: visibleLast.created_at, deleted: false };
+    if (inbox.previews && c.last_message_preview) return { text: "You deleted all messages", time: c.last_message_at, deleted: true };
+    return { text: c.last_message_preview || formatPhone(c.wa_id), time: c.last_message_at, deleted: false };
+  };
 
   const messageRow = (message: Message, testId: string) => {
     const conversation = inbox.conversations.find((c) => c.id === message.conversation_id);
@@ -199,6 +211,7 @@ export function ConversationList({ inbox, openId, onNewChat, menu }: Props) {
               {query && visible.length > 0 && <li className="list-heading">Chats</li>}
               {visible.map((c) => {
                 const unread = c.id === openId ? 0 : (inbox.unread[c.id] ?? 0);
+                const preview = previewFor(c);
                 return (
                   <li key={c.id}>
                     <button
@@ -211,12 +224,14 @@ export function ConversationList({ inbox, openId, onNewChat, menu }: Props) {
                       <span className="chat-main">
                         <span className="chat-top">
                           <span className="chat-name">{customerLabel(c)}</span>
-                          <time className="chat-time" dateTime={c.last_message_at}>
-                            {formatListTime(c.last_message_at)}
+                          <time className="chat-time" dateTime={preview.time}>
+                            {formatListTime(preview.time)}
                           </time>
                         </span>
                         <span className="chat-bottom">
-                          <span className="chat-preview">{c.last_message_preview || formatPhone(c.wa_id)}</span>
+                          <span className={`chat-preview ${preview.deleted ? "deleted" : ""}`} data-testid="chat-preview">
+                            {preview.text}
+                          </span>
                           {unread > 0 && (
                             <span className="badge" data-testid="unread-badge" aria-label={`${unread} unread`}>
                               {unread > 99 ? "99+" : unread}

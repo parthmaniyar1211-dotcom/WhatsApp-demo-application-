@@ -40,7 +40,7 @@ export function InfoPanel({ conversation, flags, messages, onClose, onJump, onUn
 
   // Starred messages of this chat (they may be older than what is loaded).
   const starredIds = Object.entries(flags)
-    .filter(([, flag]) => flag.starred)
+    .filter(([, flag]) => flag.starred && !flag.hidden)
     .map(([id]) => id);
   const starredKey = starredIds.join(",");
   const [starred, setStarred] = useState<Message[]>([]);
