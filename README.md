@@ -158,6 +158,12 @@ Fill in `WA_APP_SECRET`, `WA_VERIFY_TOKEN`, `WA_PHONE_ID` (same values as the Su
    (the same file you used for `supabase secrets set`), sends no message and never prints a secret.
 3. [REAL_TEST_PLAN.md](REAL_TEST_PLAN.md): the test with your phone.
 
+**Health check inside Supabase.** `wa-diagnose` (admin login required, sends nothing, stores nothing) runs with the
+real secrets and returns only pass/fail: secret names and lengths, whether the token is valid and when it expires,
+the phone number, the template, whether `WA_APP_SECRET` is really this Meta app's secret, whether Meta's webhook points
+at this project with the `messages` field, and a signed/unsigned/wrong-signature test of the deployed webhook.
+Call it with `POST /functions/v1/wa-diagnose` and the admin's access token.
+
 ## Commands
 
 Run from the repository root.

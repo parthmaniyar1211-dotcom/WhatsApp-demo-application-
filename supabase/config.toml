@@ -60,3 +60,6 @@ verify_jwt = true
 
 [functions.mark-read]
 verify_jwt = true
+
+[functions.wa-diagnose]
+verify_jwt = true

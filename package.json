@@ -10,7 +10,7 @@
     "lint": "npm --prefix web run lint",
     "typecheck": "npm --prefix web run typecheck",
     "check:sql": "node scripts/check-sql-sync.mjs",
-    "check:functions": "deno check --no-config supabase/functions/whatsapp-webhook/index.ts supabase/functions/send-whatsapp/index.ts supabase/functions/admin-staff/index.ts supabase/functions/mark-read/index.ts && deno lint --no-config supabase/functions",
+    "check:functions": "deno check --no-config supabase/functions/whatsapp-webhook/index.ts supabase/functions/send-whatsapp/index.ts supabase/functions/admin-staff/index.ts supabase/functions/mark-read/index.ts supabase/functions/wa-diagnose/index.ts && deno lint --no-config supabase/functions",
     "test:functions": "deno test --no-config supabase/functions/tests/",
     "test:e2e": "npm --prefix web run test:e2e",
     "sim:all": "node scripts/run-all.mjs",

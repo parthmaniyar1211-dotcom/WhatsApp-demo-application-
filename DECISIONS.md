@@ -225,3 +225,14 @@ API, no employees / staff / admin, no Stories.
 | Search typed as text no longer matches phone numbers | A defect found by a test: a name search containing digits ("Asha 7421") also matched unrelated numbers. Numbers are matched only when the query looks like a number. |
 
 Not changed: all backend behaviour from parts 1 and 2 (webhook, send, mark-read, 24-hour rule, error mapping).
+
+
+---
+
+# Part 4: audit of the live configuration
+
+| Decision | Why |
+| --- | --- |
+| Added the read-only function `wa-diagnose` (admin JWT) | Secret values cannot be read back from Supabase, so the only way to prove they are right is to use them from inside a function. It never returns a secret (values are scrubbed from every string) and sends no message. |
+| `WA_APP_SECRET` is verified against Meta with the app access token `<app id>\|<secret>` | Meta accepts that pair only if the secret is the app's real one. Comparing against a local copy would prove nothing. |
+| The outgoing path was tested by sending `hello_world` to a number that cannot be on the allowed list | A real Graph call without messaging a person: Meta answers 131030, which shows the token, phone ID and `WA_DRY_RUN=false` are working and that the error mapping reaches the user. The temporary test chat was deleted again. |
