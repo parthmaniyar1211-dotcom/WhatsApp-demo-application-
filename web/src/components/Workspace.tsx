@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import type { QuickReply, Staff } from "../lib/types";
-import { loadQuickReplies } from "../lib/api";
+import { changePassword, loadQuickReplies } from "../lib/api";
+import { errorMessage } from "../lib/format";
 import { notificationPermission, playSound, requestNotificationPermission } from "../lib/notify";
 import { type Settings, updateSettings, useSettings } from "../lib/settings";
 import { useInbox } from "../hooks/useInbox";
 import { navigate, useOnline, useRoute, useVisible } from "../hooks/useBrowserState";
 import { ConversationList } from "./ConversationList";
 import { ConversationPane } from "./ConversationPane";
-import { AdminPage } from "./AdminPage";
+import { NewChatDialog } from "./NewChatDialog";
 import { QuickRepliesDialog } from "./QuickRepliesDialog";
 import { Icon } from "./Icons";
 
-/** The signed-in app: header, conversation list, open conversation or admin page. */
+/** The signed-in app: chat list on the left, the open chat on the right. */
 export function Workspace({ me }: { me: Staff }) {
   const route = useRoute();
   const online = useOnline();
@@ -21,11 +22,10 @@ export function Workspace({ me }: { me: Staff }) {
   const openConversationById = useCallback((id: string) => navigate(`#/c/${id}`), []);
   const inbox = useInbox(me.user_id, openId, openConversationById);
 
-  const isAdminPage = route.page === "admin" && me.role === "admin";
   const openConversation = openId ? inbox.conversations.find((c) => c.id === openId) : undefined;
   const openUnread = openId ? (inbox.unread[openId] ?? 0) : 0;
 
-  // Reading a chat (tab in the foreground) marks it as read for this user.
+  // Reading a chat (tab in the foreground) marks it as read.
   const { markRead } = inbox;
   useEffect(() => {
     if (openId && openConversation && visible && openUnread > 0) markRead(openId);
@@ -33,72 +33,57 @@ export function Workspace({ me }: { me: Staff }) {
 
   const totalUnread = Object.entries(inbox.unread).reduce((sum, [id, n]) => sum + (id === openId ? 0 : n), 0);
   useEffect(() => {
-    document.title = totalUnread > 0 ? `(${totalUnread}) Shared Inbox` : "Shared Inbox";
+    document.title = totalUnread > 0 ? `(${totalUnread}) Chats` : "Chats";
   }, [totalUnread]);
 
-  // Quick replies are shared by all staff; reloaded after the dialog changes them.
+  // Quick replies; reloaded after the dialog changes them.
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
-  const [quickDialog, setQuickDialog] = useState(false);
+  const [dialog, setDialog] = useState<"new" | "quick" | "password" | null>(null);
   const reloadQuickReplies = useCallback(() => {
     loadQuickReplies().then(setQuickReplies, () => {});
   }, []);
   useEffect(reloadQuickReplies, [reloadQuickReplies]);
 
-  const detailOpen = isAdminPage || Boolean(openId);
-
   return (
-    <div className={`app ${detailOpen ? "detail-open" : ""}`}>
-      <header className="topbar">
-        <a className="brand" href="#/" aria-label="Inbox">
-          <span className="brand-mark" aria-hidden="true" />
-          <span className="brand-name">Shared Inbox</span>
-        </a>
-        <span
-          className={`live-pill ${!online ? "offline" : inbox.live}`}
-          role="status"
-          data-testid="live-status"
-          title="Realtime connection"
-        >
-          {!online ? "Offline" : inbox.live === "live" ? "Live" : inbox.live === "connecting" ? "Connecting…" : "Reconnecting…"}
-        </span>
-        <span className="spacer" />
-        <span className="me" title={me.display_name || me.staff_id} data-testid="me">
-          {me.staff_id}
-        </span>
-        <SettingsMenu me={me} isAdminPage={isAdminPage} onQuickReplies={() => setQuickDialog(true)} />
-      </header>
-
+    <div className={`app ${openId ? "detail-open" : ""}`}>
       {!online && (
-        <div className="banner warning" role="status">
+        <div className="banner warning top-banner" role="status">
           You are offline. Messages will appear again when the connection is back.
         </div>
       )}
-
       <div className="panes">
-        <aside className="sidebar" aria-label="Conversations">
-          <ConversationList inbox={inbox} me={me} openId={openId} />
+        <aside className="sidebar" aria-label="Chats">
+          <ConversationList
+            inbox={inbox}
+            openId={openId}
+            onNewChat={() => setDialog("new")}
+            menu={
+              <SettingsMenu
+                live={!online ? "offline" : inbox.live}
+                onQuickReplies={() => setDialog("quick")}
+                onPassword={() => setDialog("password")}
+              />
+            }
+          />
         </aside>
         <section className="detail">
-          {isAdminPage ? (
-            <AdminPage me={me} staff={Object.values(inbox.staff)} onChanged={inbox.reload} />
-          ) : openId && openConversation ? (
+          {openId && openConversation ? (
             <ConversationPane
               key={openId}
               conversation={openConversation}
               me={me}
-              staff={inbox.staff}
               flags={inbox.flags}
               setFlag={inbox.setFlag}
               quickReplies={quickReplies}
-              onManageQuickReplies={() => setQuickDialog(true)}
+              onManageQuickReplies={() => setDialog("quick")}
               initialUnread={openUnread}
               focusMessageId={route.page === "inbox" ? route.messageId : null}
             />
           ) : openId && inbox.loaded ? (
             <div className="empty">
-              <p>This conversation does not exist any more.</p>
+              <p>This chat does not exist any more.</p>
               <a className="button" href="#/">
-                Back to inbox
+                Back to chats
               </a>
             </div>
           ) : openId ? (
@@ -106,23 +91,91 @@ export function Workspace({ me }: { me: Staff }) {
               <div className="spinner" />
             </div>
           ) : (
-            <div className="empty">
-              <span className="brand-mark large" aria-hidden="true" />
-              <p>Select a conversation to read and reply.</p>
+            <div className="welcome">
+              <span className="welcome-logo" aria-hidden="true">
+                <Icon name="chat" size={64} />
+              </span>
+              <h2>Chats for WhatsApp</h2>
+              <p className="muted">Send and receive messages through your WhatsApp Business number.</p>
+              <button type="button" className="button primary" onClick={() => setDialog("new")}>
+                New chat
+              </button>
+              <p className="muted small welcome-note">
+                <Icon name="lock" size={13} /> Messages go through the official WhatsApp Business API.
+              </p>
             </div>
           )}
         </section>
       </div>
 
-      {quickDialog && (
-        <QuickRepliesDialog quickReplies={quickReplies} onChanged={reloadQuickReplies} onClose={() => setQuickDialog(false)} />
+      {dialog === "new" && <NewChatDialog onClose={() => setDialog(null)} />}
+      {dialog === "quick" && (
+        <QuickRepliesDialog quickReplies={quickReplies} onChanged={reloadQuickReplies} onClose={() => setDialog(null)} />
       )}
+      {dialog === "password" && <PasswordDialog onClose={() => setDialog(null)} />}
     </div>
   );
 }
 
-/** Gear menu: theme, notifications, sound, quick replies, admin, sign out. */
-function SettingsMenu({ me, isAdminPage, onQuickReplies }: { me: Staff; isAdminPage: boolean; onQuickReplies: () => void }) {
+function PasswordDialog({ onClose }: { onClose: () => void }) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setMessage(null);
+    try {
+      await changePassword(password);
+      setMessage({ kind: "ok", text: "Password changed." });
+      setPassword("");
+    } catch (err) {
+      setMessage({ kind: "error", text: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="dialog" role="dialog" aria-label="Change password" onSubmit={submit}>
+        <header className="info-header">
+          <h3>Change password</h3>
+          <span className="spacer" />
+          <button type="button" className="round-button" onClick={onClose} aria-label="Close">
+            <Icon name="close" size={20} />
+          </button>
+        </header>
+        <div className="dialog-body">
+          <label className="field">
+            <span>New password (at least 8 characters)</span>
+            <input name="new-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" autoFocus />
+          </label>
+          {message && (
+            <p className={`notice ${message.kind === "ok" ? "success" : "error"}`} role="status" data-testid="password-status">
+              {message.text}
+            </p>
+          )}
+          <button type="submit" className="button primary wide" disabled={busy || password.length < 8}>
+            Change password
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/** The ⋯ menu: connection, theme, sound, notifications, quick replies, password, log out. */
+function SettingsMenu({
+  live,
+  onQuickReplies,
+  onPassword,
+}: {
+  live: string;
+  onQuickReplies: () => void;
+  onPassword: () => void;
+}) {
   const settings = useSettings();
   const [open, setOpen] = useState(false);
   const [permission, setPermission] = useState(notificationPermission);
@@ -150,20 +203,29 @@ function SettingsMenu({ me, isAdminPage, onQuickReplies }: { me: Staff; isAdminP
     updateSettings({ notifications: granted });
   }
 
+  const run = (action: () => void) => () => {
+    setOpen(false);
+    action();
+  };
+
   return (
     <div className="settings" ref={root}>
       <button
         type="button"
-        className={`button icon small ${open ? "active" : ""}`}
+        className={`round-button ${open ? "active" : ""}`}
         onClick={() => setOpen((value) => !value)}
-        aria-label="Settings"
+        aria-label="Menu"
         aria-expanded={open}
+        title="Menu"
         data-testid="settings-button"
       >
-        <Icon name="settings" size={18} />
+        <Icon name="more" size={22} />
       </button>
       {open && (
         <div className="popover settings-popover" data-testid="settings-menu">
+          <p className={`conn ${live}`} role="status" data-testid="live-status">
+            {live === "offline" ? "Offline" : live === "live" ? "Live" : live === "connecting" ? "Connecting…" : "Reconnecting…"}
+          </p>
           <label className="setting">
             <span>Theme</span>
             <select
@@ -171,9 +233,9 @@ function SettingsMenu({ me, isAdminPage, onQuickReplies }: { me: Staff; isAdminP
               onChange={(e) => updateSettings({ theme: e.target.value as Settings["theme"] })}
               aria-label="Theme"
             >
-              <option value="system">Same as device</option>
-              <option value="light">Light</option>
               <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="system">Same as device</option>
             </select>
           </label>
           <label className="setting">
@@ -188,7 +250,7 @@ function SettingsMenu({ me, isAdminPage, onQuickReplies }: { me: Staff; isAdminP
             />
           </label>
           <label className="setting">
-            <span>Browser notifications</span>
+            <span>Desktop notifications</span>
             <input
               type="checkbox"
               checked={settings.notifications}
@@ -196,28 +258,17 @@ function SettingsMenu({ me, isAdminPage, onQuickReplies }: { me: Staff; isAdminP
               onChange={(e) => void toggleNotifications(e.target.checked)}
             />
           </label>
-          {permission === "denied" && (
-            <p className="menu-note">Notifications are blocked for this site in the browser settings.</p>
-          )}
+          {permission === "denied" && <p className="menu-note">Notifications are blocked for this site in the browser settings.</p>}
           {permission === "unsupported" && <p className="menu-note">This browser does not support notifications.</p>}
           <hr />
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onQuickReplies();
-            }}
-          >
-            Quick replies…
+          <button type="button" role="menuitem" onClick={run(onQuickReplies)}>
+            Quick replies
           </button>
-          {me.role === "admin" && (
-            <a role="menuitem" href={isAdminPage ? "#/" : "#/admin"} onClick={() => setOpen(false)}>
-              {isAdminPage ? "Back to inbox" : "Admin: staff accounts"}
-            </a>
-          )}
+          <button type="button" role="menuitem" onClick={run(onPassword)}>
+            Change password
+          </button>
           <button type="button" role="menuitem" onClick={() => void supabase.auth.signOut()}>
-            Sign out
+            Log out
           </button>
         </div>
       )}

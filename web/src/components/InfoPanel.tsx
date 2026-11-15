@@ -1,51 +1,41 @@
 import { useEffect, useState } from "react";
-import type { Conversation, Message, Staff } from "../lib/types";
-import { loadMessagesByIds, updateConversationInfo } from "../lib/api";
+import type { Conversation, Message } from "../lib/types";
+import { loadMessagesByIds, renameContact } from "../lib/api";
 import { customerLabel, errorMessage, formatListTime, formatPhone, messageSummary } from "../lib/format";
 import type { Flags } from "../hooks/useInbox";
+import { Avatar } from "./Avatar";
 import { Icon } from "./Icons";
 
 interface Props {
   conversation: Conversation;
-  me: Staff;
-  staff: Record<string, Staff>;
   flags: Flags;
-  /** Messages of this chat that are loaded right now (to count hidden ones). */
+  /** Messages of this chat that are loaded right now (to count deleted ones). */
   messages: Message[];
   onClose: () => void;
   onJump: (messageId: string) => void;
   onUnhide: (messageIds: string[]) => void;
 }
 
-/** Customer details: name, number, owner, internal notes, labels, starred and hidden messages. */
-export function InfoPanel({ conversation, me, staff, flags, messages, onClose, onJump, onUnhide }: Props) {
-  const [notes, setNotes] = useState(conversation.notes);
-  const [labelDraft, setLabelDraft] = useState("");
+/** Contact info: name (editable), number, starred messages, messages deleted for me, API limits. */
+export function InfoPanel({ conversation, flags, messages, onClose, onJump, onUnhide }: Props) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(conversation.contact_name ?? "");
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const owner = conversation.assigned_to ? staff[conversation.assigned_to] : undefined;
-  const dirty = notes !== conversation.notes;
 
-  async function save(nextNotes: string, nextLabels: string[], message: string) {
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
     setSaving(true);
     setStatus(null);
     try {
-      await updateConversationInfo(conversation.id, nextNotes, nextLabels);
-      setStatus({ kind: "ok", text: message });
+      await renameContact(conversation.id, name);
+      setEditing(false);
+      setStatus({ kind: "ok", text: "Name saved" });
     } catch (err) {
       setStatus({ kind: "error", text: errorMessage(err) });
     } finally {
       setSaving(false);
     }
-  }
-
-  function addLabel(event: React.FormEvent) {
-    event.preventDefault();
-    const label = labelDraft.trim().slice(0, 30);
-    if (!label || conversation.labels.includes(label)) return setLabelDraft("");
-    if (conversation.labels.length >= 10) return setStatus({ kind: "error", text: "A chat can have at most 10 labels." });
-    setLabelDraft("");
-    void save(conversation.notes, [...conversation.labels, label], "Label added");
   }
 
   // Starred messages of this chat (they may be older than what is loaded).
@@ -66,97 +56,46 @@ export function InfoPanel({ conversation, me, staff, flags, messages, onClose, o
   }, [starredKey, conversation.id]);
 
   const hiddenIds = messages.filter((m) => flags[m.id]?.hidden).map((m) => m.id);
+  const label = customerLabel(conversation);
 
   return (
-    <aside className="info-panel" aria-label="Customer details" data-testid="info-panel">
+    <aside className="info-panel" aria-label="Contact info" data-testid="info-panel">
       <header className="info-header">
-        <button type="button" className="button icon small" onClick={onClose} aria-label="Close customer details">
-          <Icon name="close" size={18} />
+        <button type="button" className="round-button" onClick={onClose} aria-label="Close contact info">
+          <Icon name="close" size={20} />
         </button>
-        <h3>Customer details</h3>
+        <h3>Contact info</h3>
       </header>
       <div className="info-body">
         <div className="info-identity">
-          <span className="avatar large" aria-hidden="true">
-            {customerLabel(conversation).replace(/[^\p{L}\p{N}]/gu, "").slice(0, 1).toUpperCase() || "#"}
-          </span>
-          <strong data-testid="info-name">{customerLabel(conversation)}</strong>
+          <Avatar name={label} seed={conversation.wa_id} size={110} />
+          {editing ? (
+            <form className="inline-form" onSubmit={save}>
+              <input value={name} onChange={(e) => setName(e.target.value)} aria-label="Contact name" maxLength={80} autoFocus placeholder="Name" />
+              <button type="submit" className="button small primary" disabled={saving}>
+                Save
+              </button>
+            </form>
+          ) : (
+            <strong className="info-name" data-testid="info-name">
+              {label}{" "}
+              <button type="button" className="round-button small-round" onClick={() => setEditing(true)} aria-label="Edit name" data-testid="edit-name">
+                <Icon name="edit" size={16} />
+              </button>
+            </strong>
+          )}
           <span className="muted" data-testid="info-number">
             {formatPhone(conversation.wa_id)}
           </span>
-          <span className="muted small">First contact {formatListTime(conversation.created_at)}</span>
+          {conversation.customer_name && conversation.contact_name && conversation.customer_name !== conversation.contact_name && (
+            <span className="muted small">WhatsApp name: {conversation.customer_name}</span>
+          )}
+          {status && (
+            <span className={status.kind === "ok" ? "muted small" : "error-text small"} role="status" data-testid="info-status">
+              {status.text}
+            </span>
+          )}
         </div>
-
-        <section>
-          <h4>Owner</h4>
-          <p data-testid="info-owner">
-            {conversation.assigned_to
-              ? conversation.assigned_to === me.user_id
-                ? `You (${me.staff_id})`
-                : `${owner?.staff_id ?? "Another staff member"}${owner?.display_name ? ` · ${owner.display_name}` : ""}`
-              : "Unassigned"}
-          </p>
-        </section>
-
-        <section>
-          <h4>Labels</h4>
-          <div className="labels" data-testid="info-labels">
-            {conversation.labels.length === 0 && <span className="muted small">No labels</span>}
-            {conversation.labels.map((label) => (
-              <span className="label" key={label}>
-                {label}
-                <button
-                  type="button"
-                  aria-label={`Remove label ${label}`}
-                  disabled={saving}
-                  onClick={() => void save(conversation.notes, conversation.labels.filter((l) => l !== label), "Label removed")}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-          <form className="inline-form" onSubmit={addLabel}>
-            <input
-              value={labelDraft}
-              onChange={(e) => setLabelDraft(e.target.value)}
-              placeholder="Add a label, e.g. VIP"
-              aria-label="New label"
-              maxLength={30}
-            />
-            <button type="submit" className="button small" disabled={saving || !labelDraft.trim()}>
-              Add
-            </button>
-          </form>
-        </section>
-
-        <section>
-          <h4>Notes</h4>
-          <textarea
-            className="notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Internal notes. The customer never sees these."
-            aria-label="Internal notes"
-            rows={4}
-            maxLength={5000}
-          />
-          <div className="row">
-            <button
-              type="button"
-              className="button small primary"
-              disabled={saving || !dirty}
-              onClick={() => void save(notes, conversation.labels, "Notes saved")}
-            >
-              Save notes
-            </button>
-            {status && (
-              <span className={status.kind === "ok" ? "muted small" : "error-text small"} role="status" data-testid="info-status">
-                {status.text}
-              </span>
-            )}
-          </div>
-        </section>
 
         <section>
           <h4>Starred messages ({starred.length})</h4>
@@ -174,26 +113,24 @@ export function InfoPanel({ conversation, me, staff, flags, messages, onClose, o
         </section>
 
         <section>
-          <h4>Hidden for you</h4>
+          <h4>Deleted for you</h4>
           {hiddenIds.length === 0 ? (
-            <p className="muted small">Nothing hidden in the loaded part of this chat.</p>
+            <p className="muted small">Nothing deleted in the loaded part of this chat.</p>
           ) : (
             <button type="button" className="button small" onClick={() => onUnhide(hiddenIds)} data-testid="unhide-all">
-              Show {hiddenIds.length} hidden message{hiddenIds.length === 1 ? "" : "s"} again
+              Show {hiddenIds.length} message{hiddenIds.length === 1 ? "" : "s"} again
             </button>
           )}
-          <p className="muted small">
-            “Hide for me” only hides a message in your own view. The customer and your colleagues still see it.
-          </p>
+          <p className="muted small">“Delete for me” only hides a message here. WhatsApp does not let a business delete a message for the other person.</p>
         </section>
 
         <section className="limits" data-testid="limits">
-          <h4>What WhatsApp does not allow here</h4>
+          <h4>What the WhatsApp Business API does not allow</h4>
           <ul>
-            <li>Online and “last seen” status of the customer are not shared with businesses.</li>
-            <li>Sent messages cannot be edited or deleted for the customer.</li>
-            <li>Status / Stories and voice or video calls are not available.</li>
-            <li>Free text is only possible within 24 hours of the customer’s last message.</li>
+            <li>Online and “last seen” status of a contact are not shared with businesses.</li>
+            <li>Sent messages cannot be edited or deleted for the other person.</li>
+            <li>Status updates, groups and voice or video calls are not available.</li>
+            <li>The first message to a number must be an approved template; free text is possible for 24 hours after they reply.</li>
           </ul>
         </section>
       </div>

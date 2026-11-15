@@ -15,6 +15,8 @@ export interface Conversation {
   wa_id: string;
   wa_user_id: string | null;
   customer_name: string | null;
+  /** The name saved for this number (wins over the WhatsApp profile name). */
+  contact_name: string | null;
   last_message_preview: string | null;
   last_message_at: string;
   last_inbound_at: string | null;

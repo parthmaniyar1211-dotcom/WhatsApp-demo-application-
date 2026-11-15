@@ -168,15 +168,14 @@ export async function postWebhook(url, payload, secret, { signature } = {}) {
 
 /** Signs in a staff user with the anon key (no service role needed). Returns an access token. */
 export async function staffLogin() {
-  const staffId = process.env.E2E_STAFF_ID;
   const password = process.env.E2E_PASSWORD;
-  if (!staffId || !password || !supabaseUrl() || !anonKey()) return null;
+  if (!password || !supabaseUrl() || !anonKey()) return null;
   const response = await fetch(`${supabaseUrl()}/auth/v1/token?grant_type=password`, {
     method: "POST",
     headers: { apikey: anonKey(), "Content-Type": "application/json" },
-    body: JSON.stringify({ email: `${staffId.trim().toLowerCase()}@company.demo`, password }),
+    body: JSON.stringify({ email: "admin1@company.demo", password }),
   });
-  if (!response.ok) throw new Error(`Staff login failed (HTTP ${response.status}). Check E2E_STAFF_ID / E2E_PASSWORD.`);
+  if (!response.ok) throw new Error(`Staff login failed (HTTP ${response.status}). Check E2E_PASSWORD.`);
   return (await response.json()).access_token;
 }
 

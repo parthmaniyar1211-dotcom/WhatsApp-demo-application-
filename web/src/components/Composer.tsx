@@ -198,7 +198,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
         <div className="template-row">
           <div>
             <strong>hello_world</strong>
-            <p className="muted small">Approved template (English). Re-opens the chat when the customer answers.</p>
+            <p className="muted small">Approved template (English). You can type freely after the person replies.</p>
           </div>
           <button
             className="button primary"
@@ -209,7 +209,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
             {busy ? "Sending…" : "Send template"}
           </button>
         </div>
-        <textarea disabled rows={1} placeholder="Free text is disabled until the customer replies" aria-label="Reply" />
+        <textarea disabled rows={1} placeholder="Type a message (after they reply)" aria-label="Reply" />
       </div>
     );
   }
@@ -250,7 +250,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(prop
         <div className="reply-preview" data-testid="reply-preview">
           <div className="quote static">
             <span className="quote-author">
-              Replying to {replyTo.direction === "out" ? (replyTo.sent_by_staff_id ?? "Staff") : customerName}
+              Replying to {replyTo.direction === "out" ? "yourself" : customerName}
             </span>
             <span className="quote-text">{messageSummary(replyTo) || "Message"}</span>
           </div>

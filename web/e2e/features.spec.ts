@@ -9,13 +9,13 @@ import { fileURLToPath } from "node:url";
 import { expect, type Page, test } from "@playwright/test";
 import {
   conversationItem,
-  env,
   login,
   messagesOf,
   missingForE2E,
   newCustomer,
   openChat,
   openMessageMenu,
+  closeSettings,
   openSettings,
   rest,
   simulateIncoming,
@@ -34,7 +34,7 @@ test.beforeEach(() => {
 
 async function start(page: Page, firstText = "Hello") {
   const customer = newCustomer();
-  await login(page, env.staffId, env.password);
+  await login(page);
   await simulateIncoming(customer, { kind: "text", text: firstText });
   await openChat(page, customer);
   return customer;
@@ -80,7 +80,7 @@ test("ticks: sent, delivered, read and failed look different", async ({ page }) 
 
 test("opening a chat marks it read at WhatsApp; typing sends the typing indicator", async ({ page }) => {
   const customer = newCustomer();
-  await login(page, env.staffId, env.password);
+  await login(page);
   await simulateIncoming(customer, { kind: "text", text: "Are you there?" });
   const before = await rest<{ meta_read_wa_message_id: string | null }>(
     `conversations?select=meta_read_wa_message_id&wa_id=eq.${customer.from}`,
@@ -141,7 +141,7 @@ test("reply (quote) works in both directions", async ({ page }) => {
   // The customer quotes our answer.
   await simulateIncoming(customer, { kind: "text", text: "Great, see you then", replyTo: stored.wa_message_id! });
   const followUp = page.getByTestId("message-in").filter({ hasText: "Great, see you then" });
-  await expect(followUp.getByTestId("quote")).toContainText(env.staffId.toUpperCase());
+  await expect(followUp.getByTestId("quote")).toContainText("You");
   await expect(followUp.getByTestId("quote")).toContainText("At 9 am");
 
   // Cancelling a reply removes the preview.
@@ -271,7 +271,7 @@ test("media: video, sticker, location, contact, document card and photo preview"
 
 test("history: unread divider, date separator, grouping, infinite scroll, scroll to latest", async ({ page }) => {
   const customer = newCustomer();
-  await login(page, env.staffId, env.password);
+  await login(page);
   await simulateMany(customer, Array.from({ length: 70 }, (_, i) => `History message ${i + 1}`));
   await expect(conversationItem(page, customer.from).getByTestId("unread-badge")).toHaveText("70");
   await conversationItem(page, customer.from).click();
@@ -313,7 +313,7 @@ test("history: unread divider, date separator, grouping, infinite scroll, scroll
 test("search inside a chat and across all chats", async ({ page }) => {
   const customer = newCustomer();
   const token = `needle${customer.from.slice(-6)}`;
-  await login(page, env.staffId, env.password);
+  await login(page);
   await simulateMany(customer, [`The order number is ${token}`, ...Array.from({ length: 60 }, (_, i) => `Filler ${i + 1}`)]);
 
   // Across all chats, from the sidebar. The match is older than the first loaded page.
@@ -344,7 +344,7 @@ test("search inside a chat and across all chats", async ({ page }) => {
   await expect(page.getByText("No message contains")).toBeVisible();
 });
 
-test("starred messages and hide for me", async ({ page }) => {
+test("starred messages and delete for me", async ({ page }) => {
   const customer = await start(page, "My address is 12 Lake Road");
   await simulateIncoming(customer, { kind: "text", text: "Please ignore this one" });
   const address = page.getByTestId("message-in").filter({ hasText: "12 Lake Road" });
@@ -354,8 +354,8 @@ test("starred messages and hide for me", async ({ page }) => {
   await openMessageMenu(address);
   await page.getByRole("menuitem", { name: "Star", exact: true }).click();
   await expect(address.getByTestId("star-mark")).toBeVisible();
-  if (await page.getByTestId("starred-tab").isHidden()) await page.getByRole("link", { name: "Back to inbox" }).click();
-  await page.getByTestId("starred-tab").click();
+  if (await page.getByTestId("filter-starred").isHidden()) await page.getByRole("link", { name: "Back to chats" }).click();
+  await page.getByTestId("filter-starred").click();
   const starred = page.getByTestId("starred-item").filter({ hasText: "12 Lake Road" });
   await expect(starred).toContainText(customer.name);
   await starred.click();
@@ -365,18 +365,18 @@ test("starred messages and hide for me", async ({ page }) => {
   await page.reload();
   await expect(address.getByTestId("star-mark")).toBeVisible();
 
-  // Hide for me: gone from my view, with a clear explanation and an undo.
+  // Delete for me: gone from my view, with a clear explanation and an undo.
   await openMessageMenu(ignore);
   await expect(page.getByText("WhatsApp does not let a business edit or delete a sent message.")).toBeVisible();
-  await page.getByRole("menuitem", { name: "Hide for me" }).click();
+  await page.getByRole("menuitem", { name: "Delete for me" }).click();
   await expect(ignore).toHaveCount(0);
-  await expect(page.getByTestId("chat-notice")).toContainText("Hidden for you only. The customer and your colleagues still see this message.");
+  await expect(page.getByTestId("chat-notice")).toContainText("Deleted for you only. WhatsApp does not delete it for the other person.");
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(ignore).toHaveCount(1);
 
-  // Hide again and bring it back from the customer details panel.
+  // Delete again and bring it back from the contact info panel.
   await openMessageMenu(ignore);
-  await page.getByRole("menuitem", { name: "Hide for me" }).click();
+  await page.getByRole("menuitem", { name: "Delete for me" }).click();
   await expect(ignore).toHaveCount(0);
   expect((await messagesOf(customer.from)).some((m) => m.body === "Please ignore this one")).toBe(true); // not deleted
   await page.reload();
@@ -385,7 +385,7 @@ test("starred messages and hide for me", async ({ page }) => {
   await page.getByTestId("info-button").click();
   await expect(page.getByTestId("info-starred")).toContainText("12 Lake Road");
   await page.getByTestId("unhide-all").click();
-  await page.getByRole("button", { name: "Close customer details" }).click();
+  await page.getByRole("button", { name: "Close contact info" }).click();
   await expect(ignore).toHaveCount(1);
 
   // Unstar.
@@ -435,57 +435,48 @@ test("quick replies: insert with a slash command, create and delete", async ({ p
 
   // Delete it from Settings > Quick replies.
   await openSettings(page);
-  await page.getByRole("menuitem", { name: "Quick replies…" }).click();
+  await page.getByRole("menuitem", { name: "Quick replies" }).click();
   await dialog.getByRole("button", { name: `Delete /${shortcut}` }).click();
   await expect(dialog.getByTestId("quick-row").filter({ hasText: `/${shortcut}` })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Close" }).click();
+  await closeSettings(page);
   await input.fill(`/${shortcut}`);
   await expect(page.getByTestId("quick-replies")).toContainText("No quick reply starts with");
 });
 
-test("customer info panel: name, number, owner, labels, notes, API limits", async ({ page }) => {
+test("contact info: name, number, rename, API limits", async ({ page }) => {
   const customer = await start(page, "Hello");
-  const label = `VIP${customer.from.slice(-4)}`;
+  const saved = `Asha ${customer.from.slice(-4)}`;
   await page.getByTestId("info-button").click();
   const panel = page.getByTestId("info-panel");
-  await expect(panel.getByTestId("info-name")).toHaveText(customer.name);
+  await expect(panel.getByTestId("info-name")).toContainText(customer.name);
   await expect(panel.getByTestId("info-number")).toHaveText(`+${customer.from}`);
-  await expect(panel.getByTestId("info-owner")).toHaveText("Unassigned");
 
-  await panel.getByLabel("New label").fill(label);
-  await panel.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(panel.getByTestId("info-labels")).toContainText(label);
+  // Save a name: it wins over the WhatsApp profile name, in the header and in the list.
+  await panel.getByTestId("edit-name").click();
+  await panel.getByLabel("Contact name").fill(saved);
+  await panel.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(panel.getByTestId("info-status")).toHaveText("Name saved");
+  await expect(page.getByTestId("conversation-title")).toHaveText(saved);
+  await expect(panel).toContainText(`WhatsApp name: ${customer.name}`);
 
-  await panel.getByLabel("Internal notes").fill("Prefers delivery after 6 pm.");
-  await panel.getByRole("button", { name: "Save notes" }).click();
-  await expect(panel.getByTestId("info-status")).toHaveText("Notes saved");
+  // A new message from the customer (with the profile name) does not overwrite it.
+  await simulateIncoming(customer, { kind: "text", text: "Still me" });
+  await expect(page.getByTestId("message-in")).toHaveCount(2);
+  await expect(page.getByTestId("conversation-title")).toHaveText(saved);
 
   // What the Business API cannot do is stated in the app.
   await expect(panel.getByTestId("limits")).toContainText("Online and “last seen” status");
   await expect(panel.getByTestId("limits")).toContainText("cannot be edited or deleted");
-  await expect(panel.getByTestId("limits")).toContainText("calls are not available");
+  await expect(panel.getByTestId("limits")).toContainText("Status updates, groups and voice or video calls");
 
-  await panel.getByRole("button", { name: "Close customer details" }).click();
-  await page.getByRole("button", { name: "Take chat" }).click();
-  await expect(page.getByTestId("owner")).toContainText("You");
-
-  // Stored on the server: still there after a reload; label is shown and searchable in the list.
+  // Stored on the server: still there after a reload, and searchable in the list.
   await page.reload();
-  await page.getByTestId("info-button").click();
-  await expect(panel.getByLabel("Internal notes")).toHaveValue("Prefers delivery after 6 pm.");
-  await expect(panel.getByTestId("info-owner")).toContainText(`You (${env.staffId.toUpperCase()})`);
-  await panel.getByRole("button", { name: "Close customer details" }).click();
-  if (await page.getByLabel("Search chats and messages").isHidden()) await page.getByRole("link", { name: "Back to inbox" }).click();
-  await expect(conversationItem(page, customer.from)).toContainText(label);
-  await page.getByLabel("Search chats and messages").fill(label.toLowerCase());
+  await expect(page.getByTestId("conversation-title")).toHaveText(saved);
+  if (await page.getByLabel("Search chats and messages").isHidden()) await page.getByRole("link", { name: "Back to chats" }).click();
+  await page.getByLabel("Search chats and messages").fill(saved.toLowerCase());
   await expect(page.getByTestId("conversation-item")).toHaveCount(1);
-
-  // Remove the label again.
-  await page.getByLabel("Search chats and messages").fill("");
-  await conversationItem(page, customer.from).click();
-  await page.getByTestId("info-button").click();
-  await panel.getByRole("button", { name: `Remove label ${label}` }).click();
-  await expect(panel.getByTestId("info-labels")).not.toContainText(label);
+  await expect(conversationItem(page, customer.from)).toContainText(saved);
 });
 
 test("browser notification and sound for new messages, with on/off settings", async ({ page, context }) => {
@@ -517,7 +508,7 @@ test("browser notification and sound for new messages, with on/off settings", as
   });
 
   const customer = newCustomer();
-  await login(page, env.staffId, env.password);
+  await login(page);
 
   // Defaults: sound on, notifications off.
   await simulateIncoming(customer, { kind: "text", text: "First message" });
@@ -527,9 +518,9 @@ test("browser notification and sound for new messages, with on/off settings", as
 
   // Turn notifications on, sound off.
   await openSettings(page);
-  await page.getByLabel("Browser notifications").check();
+  await page.getByLabel("Desktop notifications").check();
   await page.getByLabel("Sound for new messages").uncheck();
-  await page.keyboard.press("Escape");
+  await closeSettings(page);
   await simulateIncoming(customer, { kind: "text", text: "Second message" });
   await expect.poll(async () => (await state()).notifications.length).toBe(1);
   expect((await state()).notifications[0]).toEqual({ title: customer.name, body: "Second message" });
@@ -544,8 +535,9 @@ test("browser notification and sound for new messages, with on/off settings", as
   // The settings are remembered after a reload.
   await page.reload();
   await openSettings(page);
-  await expect(page.getByLabel("Browser notifications")).toBeChecked();
+  await expect(page.getByLabel("Desktop notifications")).toBeChecked();
   await expect(page.getByLabel("Sound for new messages")).not.toBeChecked();
+  await closeSettings(page);
 });
 
 test("emoji picker, paste an image, drag and drop a file", async ({ page }) => {
@@ -589,24 +581,25 @@ test("emoji picker, paste an image, drag and drop a file", async ({ page }) => {
   await expect(page.getByTestId("message-out").getByTestId("message-document")).toContainText("dropped.pdf");
 });
 
-test("dark mode can be switched on and is remembered", async ({ page }, testInfo) => {
+test("dark is the default theme; light can be chosen and is remembered", async ({ page }, testInfo) => {
   const customer = await start(page, "Hello in the dark");
   await simulateIncoming(customer, { kind: "image", text: "Photo" });
   await sendText(page, "Dark mode reply");
   const background = () => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor);
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  const light = await background();
-
-  await openSettings(page);
-  await page.getByLabel("Theme").selectOption("dark");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  expect(await background()).not.toBe(light);
-  await page.keyboard.press("Escape");
+  const dark = await background();
   await page.screenshot({ path: testInfo.outputPath("dark.png") });
 
-  await page.reload();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await openSettings(page);
   await page.getByLabel("Theme").selectOption("light");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  expect(await background()).not.toBe(dark);
+  await closeSettings(page);
+  await page.screenshot({ path: testInfo.outputPath("light.png") });
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await openSettings(page);
+  await page.getByLabel("Theme").selectOption("dark");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });

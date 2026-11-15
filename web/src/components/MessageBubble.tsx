@@ -58,7 +58,7 @@ export function MessageBubble(props: Props) {
             onClick={() => quoted?.wa_message_id && props.onJumpToQuoted(quoted.wa_message_id)}
           >
             <span className="quote-author">
-              {quoted ? (quoted.direction === "out" ? (quoted.sent_by_staff_id ?? "Staff") : customerName) : "Earlier message"}
+              {quoted ? (quoted.direction === "out" ? "You" : customerName) : "Earlier message"}
             </span>
             <span className="quote-text">{quoted ? messageSummary(quoted) || "Message" : "Not loaded. Scroll up to see it."}</span>
           </button>
@@ -147,7 +147,6 @@ export function MessageBubble(props: Props) {
         )}
 
         <p className="meta">
-          {outgoing && <span className="sender">{message.sent_by_staff_id ?? "Staff"}</span>}
           {starred && (
             <span className="star-mark" title="Starred" data-testid="star-mark">
               <Icon name="starFilled" size={12} />
@@ -168,7 +167,7 @@ export function MessageBubble(props: Props) {
               <button
                 type="button"
                 className="reaction ours"
-                title={`${message.reaction_business_by ?? "Staff"} reacted. Click to remove.`}
+                title="You reacted. Click to remove."
                 data-testid="reaction-business"
                 disabled={!windowOpen}
                 onClick={() => props.onReact(message, "")}
@@ -258,7 +257,7 @@ function MessageMenu({ message, starred, windowOpen, onReply, onReact, onToggleS
             </button>
           )}
           <button type="button" role="menuitem" onClick={run(() => onHide(message))}>
-            <Icon name="hide" size={16} /> Hide for me
+            <Icon name="trash" size={16} /> Delete for me
           </button>
           {!windowOpen && Boolean(message.wa_message_id) && (
             <p className="menu-note">Reply and react need an open 24-hour window.</p>

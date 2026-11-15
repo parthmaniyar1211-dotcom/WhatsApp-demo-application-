@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import {
   conversationItem,
-  env,
+  closeSettings,
+  openSettings,
   latestOutgoing,
   login,
   missingForE2E,
@@ -31,7 +32,7 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
   const customer = newCustomer();
   const isPhone = testInfo.project.name === "phone";
 
-  await login(page, env.staffId, env.password);
+  await login(page);
 
   // 1. A customer writes. The inbox must show it without a reload.
   await simulateIncoming(customer, { kind: "text", text: "Hi, is my order ready?" });
@@ -71,7 +72,6 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
   await page.getByTestId("send-button").click();
   const reply = page.getByTestId("message-out").filter({ hasText: "Yes, it is ready for pickup." });
   await expect(reply).toHaveCount(1);
-  await expect(reply).toContainText(env.staffId.toUpperCase());
   await expect(statusOf(reply)).toHaveAttribute("data-status", /sent|delivered|read/);
   await expect(page.getByTestId("reply-input")).toHaveValue("");
 
@@ -98,11 +98,6 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
   );
   expect(late.json?.statuses).toBe(0);
   await expect(statusOf(reply)).toHaveAttribute("data-status", "read");
-
-  // 5. Take the chat: the owner is shown in the header (and in the list on desktop).
-  await page.getByRole("button", { name: "Take chat" }).click();
-  await expect(page.getByTestId("owner")).toContainText(`You (${env.staffId.toUpperCase()})`);
-  if (!isPhone) await expect(item).toContainText("You");
 
   // 6. Files both ways (only in dry run: the simulated media does not exist at Meta).
   if (dryRun) {
@@ -141,13 +136,12 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
 
   // 7. The session survives a reload.
   await page.reload();
-  await expect(page.getByTestId("me")).toHaveText(env.staffId.toUpperCase());
   await expect(page.getByTestId("conversation-title")).toHaveText(customer.name);
   await expect(page.getByTestId("message-out").first()).toBeVisible();
 
   // 8. Back to the list (phone: back button), then sign out.
   if (isPhone) {
-    await page.getByRole("link", { name: "Back to inbox" }).click();
+    await page.getByRole("link", { name: "Back to chats" }).click();
     await expect(conversationItem(page, customer.from)).toBeVisible();
   }
   await signOut(page);
@@ -155,13 +149,13 @@ test("incoming message appears live, staff replies, statuses update", async ({ p
 
 test("closed 24-hour window: free text is disabled and the template sender is shown", async ({ page }, testInfo) => {
   const customer = newCustomer();
-  await login(page, env.staffId, env.password);
+  await login(page);
 
   // The customer's only message is 25 hours old.
   await simulateIncoming(customer, { kind: "text", text: "Old question", hoursAgo: 25 });
   await conversationItem(page, customer.from).click();
 
-  await expect(page.getByTestId("window-closed")).toContainText("24-hour window closed");
+  await expect(page.getByTestId("window-closed")).toContainText("Send a template message to start");
   await expect(page.getByTestId("reply-input")).toHaveCount(0);
   await expect(page.getByTestId("template-sender").locator("textarea")).toBeDisabled();
   await page.screenshot({ path: testInfo.outputPath("3-window-closed.png") });
@@ -187,17 +181,21 @@ test("closed 24-hour window: free text is disabled and the template sender is sh
 
 test("offline banner, and messages that arrived while offline show up after reconnecting", async ({ page, context }) => {
   const customer = newCustomer();
-  await login(page, env.staffId, env.password);
+  await login(page);
 
   await context.setOffline(true);
   await expect(page.getByText("You are offline.")).toBeVisible();
+  await openSettings(page);
   await expect(page.getByTestId("live-status")).toHaveText("Offline");
+  await closeSettings(page);
 
   // Arrives while this browser has no connection.
   await simulateIncoming(customer, { kind: "text", text: "Sent while you were offline" });
 
   await context.setOffline(false);
+  await openSettings(page);
   await expect(page.getByTestId("live-status")).toHaveText("Live");
+  await closeSettings(page);
   const item = conversationItem(page, customer.from);
   await expect(item).toContainText("Sent while you were offline");
   await expect(item.getByTestId("unread-badge")).toHaveText("1");
@@ -205,8 +203,7 @@ test("offline banner, and messages that arrived while offline show up after reco
 
 test("wrong password is rejected with a clear message", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("Staff ID").fill(env.staffId);
   await page.getByLabel("Password").fill("definitely-wrong-password");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("alert")).toContainText("Wrong staff ID or password");
+  await expect(page.getByRole("alert")).toContainText("Wrong password");
 });

@@ -47,8 +47,8 @@ export function App() {
   }
   if (profile.state === "not-staff") {
     return (
-      <CenterCard title="Account not active">
-        <p>This login is disabled or is not a staff account. Ask your admin for access.</p>
+      <CenterCard title="Login not active">
+        <p>This login is not active.</p>
         <button className="button primary" onClick={() => void supabase.auth.signOut()}>
           Sign out
         </button>

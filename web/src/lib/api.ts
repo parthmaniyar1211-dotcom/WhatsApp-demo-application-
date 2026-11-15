@@ -2,9 +2,10 @@
 
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-import type { Message, MessageFlag, QuickReply, Staff } from "./types";
+import type { Conversation, Message, MessageFlag, QuickReply } from "./types";
 
-export const STAFF_EMAIL_DOMAIN = "company.demo";
+/** The single login of this app. Only the password is typed; change it under Settings. */
+export const OWNER_EMAIL = "admin1@company.demo";
 export const MAX_TEXT_LENGTH = 4096;
 export const MAX_CAPTION_LENGTH = 1024;
 const BUCKET = "files";
@@ -28,12 +29,6 @@ export const ALLOWED_FILE_TYPES = Object.keys(FILE_RULES);
 
 function baseType(file: File): string {
   return file.type.split(";")[0].trim().toLowerCase();
-}
-
-/** Staff ID "EMP1001" signs in as emp1001@company.demo. Returns null for an invalid ID. */
-export function staffEmail(staffId: string): string | null {
-  const id = staffId.trim().toLowerCase();
-  return /^[a-z0-9]{3,20}$/.test(id) ? `${id}@${STAFF_EMAIL_DOMAIN}` : null;
 }
 
 /** Calls an Edge Function and turns its JSON error into a normal Error. */
@@ -210,22 +205,22 @@ export async function loadMessagesByIds(ids: string[]): Promise<Message[]> {
   return (data ?? []) as Message[];
 }
 
-// --- Admin (the admin-staff function checks the admin role on the server) ---
+// --- Contacts and account ---------------------------------------------------------------
 
-export function adminCreateStaff(input: { staffId: string; password: string; displayName: string; role: Staff["role"] }) {
-  return callFunction<{ staff: Staff }>("admin-staff", {
-    action: "create",
-    staff_id: input.staffId,
-    password: input.password,
-    display_name: input.displayName,
-    role: input.role,
-  });
+/** Adds a phone number (digits with country code) and returns its chat. Existing numbers are reused. */
+export async function startConversation(phone: string, name: string): Promise<Conversation> {
+  const { data, error } = await supabase.rpc("start_conversation", { p_phone: phone, p_name: name || null });
+  rpcError(error);
+  return data as Conversation;
 }
 
-export function adminSetDisabled(userId: string, disabled: boolean) {
-  return callFunction<{ staff: Staff }>("admin-staff", { action: "set_disabled", user_id: userId, disabled });
+export async function renameContact(conversationId: string, name: string): Promise<void> {
+  const { error } = await supabase.rpc("rename_contact", { p_conversation_id: conversationId, p_name: name });
+  rpcError(error);
 }
 
-export function adminResetPassword(userId: string, password: string) {
-  return callFunction<{ staff: Staff }>("admin-staff", { action: "reset_password", user_id: userId, password });
+export async function changePassword(password: string): Promise<void> {
+  if (password.length < 8) throw new Error("Use at least 8 characters.");
+  const { error } = await supabase.auth.updateUser({ password });
+  rpcError(error);
 }

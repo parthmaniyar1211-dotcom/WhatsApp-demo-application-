@@ -2,8 +2,9 @@ import type { Conversation, Message } from "./types";
 
 export const WINDOW_MS = 24 * 60 * 60 * 1000;
 
-export function customerLabel(c: Pick<Conversation, "customer_name" | "wa_id">): string {
-  return c.customer_name?.trim() || formatPhone(c.wa_id);
+/** Saved name, else the WhatsApp profile name, else the number. */
+export function customerLabel(c: Pick<Conversation, "customer_name" | "contact_name" | "wa_id">): string {
+  return c.contact_name?.trim() || c.customer_name?.trim() || formatPhone(c.wa_id);
 }
 
 /** "+9198…" for phone numbers. WhatsApp can hide the number of customers who use a username. */

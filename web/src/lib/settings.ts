@@ -9,7 +9,7 @@ export interface Settings {
 }
 
 const KEY = "inbox-settings";
-const DEFAULTS: Settings = { theme: "system", notifications: false, sound: true };
+const DEFAULTS: Settings = { theme: "dark", notifications: false, sound: true };
 const listeners = new Set<() => void>();
 let current: Settings = read();
 
@@ -17,7 +17,7 @@ function read(): Settings {
   try {
     const stored = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<Settings>;
     return {
-      theme: stored.theme === "light" || stored.theme === "dark" ? stored.theme : "system",
+      theme: stored.theme === "light" || stored.theme === "system" ? stored.theme : "dark",
       notifications: stored.notifications === true,
       sound: stored.sound !== false,
     };

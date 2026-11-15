@@ -13,10 +13,7 @@ import {
 } from "../../scripts/lib/meta.mjs";
 
 export const env = {
-  staffId: process.env.E2E_STAFF_ID ?? "",
   password: process.env.E2E_PASSWORD ?? "",
-  adminId: process.env.E2E_ADMIN_ID ?? "",
-  adminPassword: process.env.E2E_ADMIN_PASSWORD ?? "",
   appSecret: process.env.WA_APP_SECRET ?? "",
 };
 
@@ -26,7 +23,6 @@ export function missingForE2E(): string | null {
   if (!supabaseUrl()) missing.push("VITE_SUPABASE_URL (web/.env)");
   if (!anonKey()) missing.push("VITE_SUPABASE_ANON_KEY (web/.env)");
   if (!env.appSecret) missing.push("WA_APP_SECRET (.env)");
-  if (!env.staffId) missing.push("E2E_STAFF_ID (.env)");
   if (!env.password) missing.push("E2E_PASSWORD (.env)");
   if (missing.length === 0) return null;
   return `End-to-end test skipped: it needs a real Supabase project. Missing: ${missing.join(", ")}. See TEST_PLAN.md.`;
@@ -83,7 +79,7 @@ export async function simulateReaction(customer: { from: string; name: string },
   expect(result.json?.reactions).toBe(1);
 }
 
-/** Reads rows through the REST API as the test staff member (RLS applies). */
+/** Reads rows through the REST API as the signed-in owner (RLS applies). */
 export async function rest<T = Record<string, unknown>>(pathAndQuery: string): Promise<T[]> {
   const token = await staffLogin();
   if (!token) throw new Error("staff login failed");
@@ -118,27 +114,46 @@ export async function latestOutgoing(waId: string) {
   return outgoing[outgoing.length - 1];
 }
 
-export async function login(page: Page, staffId: string, password: string) {
+export async function login(page: Page, password: string = env.password) {
   await page.goto("/");
-  await page.getByLabel("Staff ID").fill(staffId);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByTestId("me")).toHaveText(staffId.toUpperCase());
+  await expect(page.getByTestId("settings-button")).toBeVisible();
+  // Realtime must be connected before the test simulates anything.
+  await openSettings(page);
   await expect(page.getByTestId("live-status")).toHaveText("Live");
+  await closeSettings(page);
 }
 
 export function conversationItem(page: Page, waId: string) {
   return page.locator(`[data-testid="conversation-item"][data-wa-id="${waId}"]`);
 }
 
+// On a phone the menu lives in the chat list, so an open chat is left first and restored afterwards.
+const leftChat = new WeakSet<Page>();
+
 export async function openSettings(page: Page) {
+  // Wait for the page to settle: either the list (menu button) or an open chat on a phone (back link).
+  const menuButton = page.getByTestId("settings-button");
+  const backLink = page.getByRole("link", { name: "Back to chats" });
+  await expect.poll(async () => (await menuButton.isVisible()) || (await backLink.isVisible())).toBe(true);
+  if (!(await menuButton.isVisible())) {
+    await backLink.click();
+    leftChat.add(page);
+  }
   if (!(await page.getByTestId("settings-menu").isVisible())) await page.getByTestId("settings-button").click();
   await expect(page.getByTestId("settings-menu")).toBeVisible();
 }
 
+/** Closes the menu (and any dialog it opened) and goes back to the chat that openSettings left. */
+export async function closeSettings(page: Page) {
+  if (await page.getByTestId("settings-menu").isVisible()) await page.keyboard.press("Escape");
+  if (leftChat.delete(page)) await page.goBack();
+}
+
 export async function signOut(page: Page) {
   await openSettings(page);
-  await page.getByRole("menuitem", { name: "Sign out" }).click();
+  await page.getByRole("menuitem", { name: "Log out" }).click();
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
 }
 

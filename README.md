@@ -5,6 +5,9 @@ Staff reply from the web app and the customer receives the reply in WhatsApp. Ph
 voice notes work both ways, with ticks, quoted replies, reactions and the other things staff know from WhatsApp
 (as far as the official Cloud API allows).
 
+The web app looks and works like WhatsApp Web: a chat list on the left, the conversation on the right, a
+"New chat" button to add a phone number, and a single password to sign in (no staff IDs, no admin page).
+
 This repository holds the **Supabase backend** (database, storage, Edge Functions), a **web test console**
 and a **test harness** that simulates WhatsApp without a phone. The future Android APK uses the same backend,
 so a pass here means the backend is correct.
@@ -70,7 +73,8 @@ select id, 'ADMIN1', 'Admin', 'admin' from auth.users where email = 'admin1@comp
 on conflict (user_id) do update set role = 'admin', disabled = false;
 ```
 
-You now sign in to the web app with staff ID `ADMIN1`. Create all other staff from the **Admin** page.
+You now sign in to the web app with just that password (the app signs in as `admin1@company.demo`).
+Change the password any time from the ⋯ menu → **Change password**.
 
 ### 4. Set the secrets
 
@@ -122,7 +126,12 @@ npm install
 npm run dev                 # http://localhost:5173
 ```
 
-Sign in with `ADMIN1`. Open **Admin**, create `EMP1001` with a password.
+Sign in with the password from step 3.
+
+**Add a contact:** click the new-chat button (top left), type the number with country code (a 10-digit number gets
++91), optionally a name, **Start chat**. WhatsApp only lets a business start a conversation with an approved
+template, so the chat offers **Send template** first (`hello_world`). Once the person replies you can type freely
+for 24 hours. A Meta test number can only message numbers added under WhatsApp → API Setup.
 
 ### 7. Configure the test harness
 
@@ -220,15 +229,15 @@ in the root `.env`, then run `npm run sim:all` and `npm run test:e2e`.
 | Photos, videos, stickers, documents, locations, contacts | preview, player, file card with name and size, map link |
 | Long chats | date separators, grouped messages, unread divider, endless scrolling, "scroll to latest" button |
 | Search | in the sidebar: chats (name, number, label) and message text in all chats; in a chat: the magnifier |
-| Starred / Hide for me | private to each staff member. Hiding never deletes anything for the customer |
+| Starred / Delete for me | private to you. Deleting for me never deletes anything for the other person |
 | Quick replies | type `/` in the reply box; manage them under Settings (gear) → Quick replies |
-| Customer details | the ⓘ button: name, number, owner, labels, internal notes, starred and hidden messages |
+| Contact info | the ⓘ button: saved name (editable), number, starred messages, messages deleted for me |
 | Notifications, sound, dark mode | Settings (gear), remembered per browser |
 | Emoji, paste, drag and drop | emoji button; Ctrl+V a screenshot; drop a file on the chat |
 
 Not possible with the official WhatsApp Business API, and therefore not in the app: the customer's online /
 last-seen status, Status/Stories, editing or deleting a sent message for the customer, and calls.
-The customer details panel and the message menu say so.
+The contact info panel and the message menu say so.
 
 ## Backend contract (for the APK)
 
@@ -259,6 +268,9 @@ The APK uses the same anon key and a staff login (`emp1001@company.demo` + passw
   user opens a chat, when a new message arrives in the open chat, and (with `typing: true`, at most every
   20 s) while the user types.
 - **Files**: the bucket is private. Ask for a signed URL when showing a file.
-- **Admin**: `POST /functions/v1/admin-staff` with `action` = `create` / `set_disabled` / `reset_password`.
+- **Contacts**: RPC `start_conversation(p_phone, p_name)` (digits with country code) and
+  `rename_contact(p_conversation_id, p_name)`; `conversations.contact_name` is the saved name and wins over the
+  WhatsApp profile name (`customer_name`).
+- **Admin** (not used by the web app any more): `POST /functions/v1/admin-staff` with `action` = `create` / `set_disabled` / `reset_password`.
 - **Customers without a phone number**: since 2026 Meta can hide the number of customers who use a
   username. `conversations.wa_id` is then Meta's user id (not digits); show "number hidden".

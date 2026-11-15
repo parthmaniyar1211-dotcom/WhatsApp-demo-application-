@@ -3,8 +3,8 @@
 //
 //   node scripts/simulate-duplicate.mjs
 //
-// The webhook's own counters are always checked. If E2E_STAFF_ID / E2E_PASSWORD and the
-// anon key are set, the script also signs in as staff and counts the rows in the database.
+// The webhook's own counters are always checked. If E2E_PASSWORD and the
+// anon key are set, the script also signs in and counts the rows in the database.
 
 import { fail, harnessConfig, incomingPayload, newMessageId, pass, postWebhook, restSelect, staffLogin } from "./lib/meta.mjs";
 
@@ -35,7 +35,7 @@ if (second.status === 200 && second.json?.stored === 0 && second.json?.duplicate
 
 const token = await staffLogin();
 if (!token) {
-  console.log("SKIP  database row count (set SUPABASE_URL, SUPABASE_ANON_KEY, E2E_STAFF_ID, E2E_PASSWORD to enable)");
+  console.log("SKIP  database row count (set SUPABASE_URL, SUPABASE_ANON_KEY, E2E_PASSWORD to enable)");
 } else {
   const rows = await restSelect(token, `wa_messages?select=id&wa_message_id=eq.${encodeURIComponent(id)}`);
   if (rows.length === 1) pass("exactly one row in wa_messages");

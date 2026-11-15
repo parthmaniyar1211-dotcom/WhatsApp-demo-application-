@@ -202,3 +202,26 @@ open window because they are normal (non-template) messages.
   stand-in for the Graph API (pass and fail cases, secrets redacted).
 - Deploying the new migration and the `mark-read` function to your hosted project.
 - Recording in Firefox and Safari (only Chromium was run).
+
+
+---
+
+# Part 3: WhatsApp Web look, contacts, no staff concept
+
+The request: "exactly like the WhatsApp interface", add a contact by number, chat with them through the WhatsApp
+API, no employees / staff / admin, no Stories.
+
+| Decision | Why |
+| --- | --- |
+| New look: dark by default, chat list left, conversation right, doodle background, green/teal palette, avatars, filter chips (All / Unread / Starred), round icon buttons | Matches the screenshot of WhatsApp Web. Own colours and icons, no WhatsApp logo or artwork. Light theme is in the ⋯ menu. |
+| One login: only a password is typed; the app signs in as `admin1@company.demo`. Change it in ⋯ → Change password | Removes staff IDs from the interface. The site is public, so some login is still required: without it anyone could read chats and send messages. |
+| Removed from the interface: staff IDs, admin page, owner / take chat, labels, notes, sender IDs on messages | Not wanted. |
+| Kept in the backend: `staff` table, roles, `admin-staff` function, `sent_by` columns | Row level security is built on `is_active_staff()`, and the APK plan uses the same backend. Nothing there is exposed in the web app any more. Removing it would be a risky migration for no visible gain. |
+| New chat = RPC `start_conversation(phone, name)`; saved name in `conversations.contact_name` | Clients cannot insert into `conversations`. The WhatsApp profile name keeps arriving in `customer_name` and never overwrites the saved name (tested). |
+| A 10-digit number gets +91 | The default country for this team. Anything else is typed with its country code. Constant `DEFAULT_COUNTRY` in `NewChatDialog.tsx`. |
+| Starting a chat shows the template sender, with the reason in plain words | WhatsApp rule: a business can only open a conversation with an approved template; free text works for 24 hours after the person replies. This cannot be removed. A Meta *test* number can only message numbers on its allowed list. |
+| "Hide for me" renamed "Delete for me", with a note that the other person still has the message | Same feature, WhatsApp wording, honest about the API limit. |
+| Settings (theme, sound, notifications, quick replies, password, log out) live in the ⋯ menu of the chat list | Like WhatsApp Web. On a phone the menu is therefore in the list, not inside a chat. |
+| Search typed as text no longer matches phone numbers | A defect found by a test: a name search containing digits ("Asha 7421") also matched unrelated numbers. Numbers are matched only when the query looks like a number. |
+
+Not changed: all backend behaviour from parts 1 and 2 (webhook, send, mark-read, 24-hour rule, error mapping).

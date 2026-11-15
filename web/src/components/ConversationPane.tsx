@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "../lib/supabase";
 import type { Conversation, Message, QuickReply, Staff } from "../lib/types";
+import { Avatar } from "./Avatar";
 import { markReadAtWhatsApp, searchMessages, sendReaction } from "../lib/api";
 import {
   customerLabel,
@@ -24,7 +24,6 @@ import { Icon } from "./Icons";
 interface Props {
   conversation: Conversation;
   me: Staff;
-  staff: Record<string, Staff>;
   flags: Flags;
   setFlag: (messageId: string, patch: Partial<{ starred: boolean; hidden: boolean }>) => Promise<void>;
   quickReplies: QuickReply[];
@@ -38,14 +37,14 @@ interface Props {
 const GROUP_GAP_MS = 5 * 60 * 1000;
 
 export function ConversationPane(props: Props) {
-  const { conversation, me, staff, flags, setFlag } = props;
+  const { conversation, me, flags, setFlag } = props;
   const stream = useMessages(conversation.id);
   const now = useNow(30_000);
   const visible = useVisible();
   const windowOpen = isWindowOpen(conversation.last_inbound_at, now);
   const name = customerLabel(conversation);
 
-  // Hidden messages are only hidden in this staff member's own view.
+  // Messages deleted for me are only hidden in this view.
   const messages = useMemo(() => stream.messages.filter((m) => !flags[m.id]?.hidden), [stream.messages, flags]);
   const byWaId = useMemo(() => {
     const map = new Map<string, Message>();
@@ -203,19 +202,6 @@ export function ConversationPane(props: Props) {
   }, [query, searchOpen, conversation.id]);
   const shownResults = searchOpen && results && results.query === query.trim() ? results.rows : null;
 
-  // --- Take / release chat
-  const [ownerBusy, setOwnerBusy] = useState(false);
-  const owner = conversation.assigned_to ? staff[conversation.assigned_to] : undefined;
-  const mine = conversation.assigned_to === me.user_id;
-
-  async function changeOwner(action: "take_conversation" | "release_conversation") {
-    setOwnerBusy(true);
-    const { error } = await supabase.rpc(action, { p_conversation_id: conversation.id });
-    setOwnerBusy(false);
-    if (error) setNotice({ text: `Could not change the owner: ${errorMessage(error)}` });
-    // The new owner arrives through Realtime for everyone, including this user.
-  }
-
   // --- Message actions
   const actions = {
     onReply: (message: Message) => setReplyTo(message),
@@ -231,7 +217,7 @@ export function ConversationPane(props: Props) {
       setFlag(message.id, { hidden: true }).then(
         () =>
           setNotice({
-            text: "Hidden for you only. The customer and your colleagues still see this message.",
+            text: "Deleted for you only. WhatsApp does not delete it for the other person.",
             undo: () => {
               void setFlag(message.id, { hidden: false });
               setNotice(null);
@@ -273,19 +259,19 @@ export function ConversationPane(props: Props) {
         }}
       >
         <header className="conversation-header">
-          <a className="back" href="#/" aria-label="Back to inbox">
+          <a className="back" href="#/" aria-label="Back to chats">
             <Icon name="back" size={26} />
           </a>
-          <button type="button" className="conversation-title" onClick={() => setInfoOpen((open) => !open)} title="Customer details">
-            <h2 data-testid="conversation-title">{name}</h2>
-            <p className="muted small">
-              {formatPhone(conversation.wa_id)}
-              {conversation.labels.length > 0 && ` · ${conversation.labels.join(", ")}`}
-            </p>
+          <button type="button" className="conversation-title" onClick={() => setInfoOpen((open) => !open)} title="Contact info">
+            <Avatar name={name} seed={conversation.wa_id} size={40} />
+            <span className="title-text">
+              <h2 data-testid="conversation-title">{name}</h2>
+              <p className="muted small">{formatPhone(conversation.wa_id)}</p>
+            </span>
           </button>
           <button
             type="button"
-            className={`button icon small ${searchOpen ? "active" : ""}`}
+            className={`round-button ${searchOpen ? "active" : ""}`}
             onClick={() => {
               setSearchOpen((open) => !open);
               setQuery("");
@@ -294,45 +280,18 @@ export function ConversationPane(props: Props) {
             aria-expanded={searchOpen}
             data-testid="chat-search-button"
           >
-            <Icon name="search" size={18} />
+            <Icon name="search" size={20} />
           </button>
           <button
             type="button"
-            className={`button icon small ${infoOpen ? "active" : ""}`}
+            className={`round-button ${infoOpen ? "active" : ""}`}
             onClick={() => setInfoOpen((open) => !open)}
-            aria-label="Customer details"
+            aria-label="Contact info"
             aria-expanded={infoOpen}
             data-testid="info-button"
           >
-            <Icon name="info" size={18} />
+            <Icon name="info" size={20} />
           </button>
-          <div className="owner" data-testid="owner">
-            {conversation.assigned_to ? (
-              <span className={`owner-tag ${mine ? "mine" : ""}`}>
-                Owner: {mine ? `You (${me.staff_id})` : (owner?.staff_id ?? "another staff member")}
-              </span>
-            ) : (
-              <span className="owner-tag none">Unassigned</span>
-            )}
-            {mine ? (
-              <button className="button small" disabled={ownerBusy} onClick={() => void changeOwner("release_conversation")}>
-                Release
-              </button>
-            ) : (
-              <button
-                className="button small primary"
-                disabled={ownerBusy}
-                onClick={() => void changeOwner("take_conversation")}
-              >
-                {conversation.assigned_to ? "Take over" : "Take chat"}
-              </button>
-            )}
-            {conversation.assigned_to && !mine && me.role === "admin" && (
-              <button className="button small" disabled={ownerBusy} onClick={() => void changeOwner("release_conversation")}>
-                Release
-              </button>
-            )}
-          </div>
         </header>
 
         {searchOpen && (
@@ -360,7 +319,7 @@ export function ConversationPane(props: Props) {
                       }}
                     >
                       <span className="result-text">
-                        <strong>{message.direction === "out" ? (message.sent_by_staff_id ?? "Staff") : name}:</strong>{" "}
+                        <strong>{message.direction === "out" ? "You" : name}:</strong>{" "}
                         {messageSummary(message)}
                       </span>
                       <time className="muted small">{formatListTime(message.created_at)}</time>
@@ -468,16 +427,16 @@ export function ConversationPane(props: Props) {
         {windowOpen ? (
           conversation.last_inbound_at && (
             <div className="window-note" data-testid="window-open">
-              Reply window open: {formatRemaining(conversation.last_inbound_at, now)} left
+              You can reply freely for another {formatRemaining(conversation.last_inbound_at, now)} left
             </div>
           )
         ) : (
           <div className="banner closed" role="status" data-testid="window-closed">
-            <strong>24-hour window closed.</strong>{" "}
+            <strong>Send a template message to start.</strong>{" "}
             {conversation.last_inbound_at
-              ? "The customer last wrote more than 24 hours ago."
-              : "The customer has not written yet."}{" "}
-            WhatsApp only allows an approved template message until the customer replies.
+              ? "This person last wrote more than 24 hours ago."
+              : "This person has not written to you yet."}{" "}
+            WhatsApp only allows an approved template message until they reply. Then you can type freely for 24 hours.
           </div>
         )}
 
@@ -501,8 +460,6 @@ export function ConversationPane(props: Props) {
       {infoOpen && (
         <InfoPanel
           conversation={conversation}
-          me={me}
-          staff={staff}
           flags={flags}
           messages={stream.messages}
           onClose={() => setInfoOpen(false)}

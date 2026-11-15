@@ -91,8 +91,7 @@ cd web && npx playwright install chromium && cd ..
 npm run test:e2e
 ```
 
-- **Pass:** `40 passed` (20 tests at desktop width, 20 at phone width). Without `E2E_ADMIN_ID` /
-  `E2E_ADMIN_PASSWORD` the two admin tests are skipped: `36 passed, 4 skipped`.
+- **Pass:** `44 passed` (22 tests at desktop width, 22 at phone width).
 - The voice-note test needs `ffprobe` only for an extra check; without it the test still runs.
 - **Skipped with "End-to-end test skipped: it needs a real Supabase project. Missing: ..."** → fill in the
   values it lists.
@@ -163,31 +162,24 @@ Open **Old Customer**.
 - **Fail:** you can type free text while the banner is shown, or the server accepts free text
   (it must answer "The 24-hour window is closed").
 
-### 2.6 Take chat
+### 2.6 Add a contact and start a chat
 
-Open a conversation and press **Take chat**. Sign in as a second staff member in another browser
-(or a private window).
+New chat button (top left) → phone number `98765 43210` → name `Test Person` → **Start chat**.
 
-- **Pass:** the header shows "Owner: You (EMP1001)". The other staff member sees the owner's ID on the
-  conversation and in the list within a second. **Release** removes it for everyone.
+- **Pass:** the chat opens named "Test Person", with the banner "Send a template message to start" and a
+  **Send template** button instead of the text box. After the template is sent, `npm run sim:text -- "Hi" --from 919876543210`
+  opens the text box without a reload, and the saved name stays.
+- Typing the same number again opens the same chat (no duplicate). A number with fewer than 7 digits is refused.
 
-### 2.7 Unread counts are per person
+### 2.7 Password
 
-Still with two staff members signed in, send `npm run sim:text -- "Who reads this?"`.
+⋯ menu → **Change password** → enter a new one → "Password changed." Log out, sign in with the new one.
 
-- **Pass:** both see an unread badge. When one opens the chat, only that person's badge disappears.
+### 2.8 Unread
 
-### 2.8 Admin
+`npm run sim:text -- "Who reads this?"`
 
-Sign in as `ADMIN1`, click the gear at the top right, choose **Admin: staff accounts**.
-
-| Action | Pass |
-| --- | --- |
-| Create `EMP1002` with a password | green "Created EMP1002"; that person can sign in |
-| Sign in as `EMP1002` | the gear menu has no **Admin** entry |
-| **Reset password** for `EMP1002` | the old password stops working, the new one works |
-| **Disable** `EMP1002` | their open app stops showing data after a reload ("Account not active"); signing in again is refused |
-| **Enable** | they can sign in again |
+- **Pass:** a green badge on the chat; the **Unread** filter lists it; opening it clears the badge.
 
 ### 2.9 Reload and offline
 
@@ -217,14 +209,14 @@ Use the **Test Customer** chat. `<id>` is the `wa_message_id` of one of your rep
 | Search in a chat | magnifier in the chat header → type a word | matching messages are listed; a click jumps to the message and highlights it |
 | Search everywhere | type a word in the sidebar search | a "Messages" section lists matches from all chats |
 | Star | message menu → **Star** | a small star on the bubble; the message is listed under the **Starred** tab |
-| Hide for me | message menu → **Hide for me** | the message disappears for you only; the notice says the customer and colleagues still see it; **Undo** brings it back |
-| Quick replies | type `/he` in the reply box, press Enter | the saved text is inserted (not sent). Gear → **Quick replies…** lets you add, change and delete them |
-| Customer details | ⓘ in the chat header | name, number, owner, labels, notes. Add a label: it appears in the chat list. Save a note: it is still there after a reload |
+| Delete for me | message menu → **Delete for me** | the message disappears for you only; the notice says WhatsApp does not delete it for the other person; **Undo** brings it back |
+| Quick replies | type `/he` in the reply box, press Enter | the saved text is inserted (not sent). ⋯ menu → **Quick replies** lets you add, change and delete them |
+| Contact info | ⓘ in the chat header | name, number. Edit the name: it changes in the header and the list and survives a new message |
 | API limits | ⓘ → scroll down | a list of what WhatsApp does not allow (online status, editing/deleting, Status, calls) |
-| Notification and sound | gear → switch on **Browser notifications**, allow it; open another chat; `npm run sim:text -- "Ping" --from 919800000009` | a sound and a browser notification with the customer's name |
+| Notification and sound | ⋯ menu → switch on **Desktop notifications**, allow it; open another chat; `npm run sim:text -- "Ping" --from 919800000009` | a sound and a browser notification with the customer's name |
 | Emoji | smiley button → pick one | it is inserted where the cursor is |
 | Paste / drop | copy a screenshot and press Ctrl+V in the reply box; drag a PDF onto the chat | the file is attached, ready to send |
-| Dark mode | gear → Theme → **Dark** | the whole app is dark and stays dark after a reload |
+| Dark mode | ⋯ menu → Theme → **Light** / **Dark** (dark is the default) | the whole app is dark and stays dark after a reload |
 
 ---
 
