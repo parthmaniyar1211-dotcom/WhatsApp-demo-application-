@@ -169,9 +169,20 @@ Run from the repository root.
 | `npm run real-check` | live check of the deployed webhook and your real token (needs `~/wa-secrets.env`) |
 | `npm run test:e2e` | Playwright test against your Supabase project (first time: `cd web && npx playwright install chromium`) |
 
-## Hosting the web app (optional)
+## Hosting the web app
 
-Running it locally is enough for the test. To host it for free:
+**GitHub Pages (set up in this repository).** `.github/workflows/deploy-web.yml` builds `web/` and publishes it
+on every push to the default branch.
+
+1. Once: repository **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. Push, or run **Actions → Deploy web app → Run workflow**.
+3. The site is at `https://<owner>.github.io/<repository>/`.
+
+The workflow contains the public Supabase URL and anon key (they are in the browser bundle of every hosted copy
+anyway; row level security protects the data). Never add the service_role key or any `WA_*` value there.
+Asset paths are relative (`base: "./"`), so the same build also works at the root of another host.
+
+**Cloudflare Pages / Netlify**
 
 | Setting | Cloudflare Pages | Netlify |
 | --- | --- | --- |
@@ -181,7 +192,7 @@ Running it locally is enough for the test. To host it for free:
 | Environment variables | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | same |
 | Node version | 20 or newer (`NODE_VERSION=22`) | same |
 
-Only the anon key goes into the hosting settings. `web/public/_headers` adds basic security headers on both hosts.
+Only the anon key goes into hosting settings. `web/public/_headers` adds basic security headers on both hosts.
 
 ## Running everything locally (optional, needs Docker)
 

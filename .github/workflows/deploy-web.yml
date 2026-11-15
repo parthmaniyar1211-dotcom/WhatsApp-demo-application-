@@ -1,0 +1,54 @@
+# Builds the web app and publishes it to GitHub Pages on every push to the default branch.
+# One-time setup: repository Settings > Pages > Source: "GitHub Actions".
+#
+# VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY below are the PUBLIC project URL and anon key.
+# They end up in the browser bundle of any hosted copy anyway; what protects the data is row level
+# security and the Edge Functions. Never put the service_role key or any WA_* secret here.
+name: Deploy web app
+
+on:
+  push:
+    branches: [ccr-929f1931-uztnem, main]
+    paths: ["web/**", ".github/workflows/deploy-web.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+        env:
+          VITE_SUPABASE_URL: https://aanomjzsrozcgnpymnqj.supabase.co
+          VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFhbm9tanpzcm96Y2ducHltbnFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ3Mzc2NTgsImV4cCI6MjExMDMxMzY1OH0.BR7RsRyx7sn9KADourOIB6wFls36zzLBetSrJJ04w8o
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
