@@ -8,10 +8,14 @@ import {
   type SendStore,
   type StaffRow,
 } from "../send-whatsapp/handler.ts";
+import type { CredentialLookup } from "../_shared/connections.ts";
 import { assert, assertEquals, fakeFetch, noSleep } from "./helpers.ts";
 
 const USER = "11111111-1111-4111-8111-111111111111";
 const CONV = "22222222-2222-4222-8222-222222222222";
+const TENANT = "33333333-3333-4333-8333-333333333333";
+const OTHER_TENANT = "44444444-4444-4444-8444-444444444444";
+const CONN = "55555555-5555-4555-8555-555555555555";
 const NOW = Date.parse("2026-11-14T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW - h * 3600_000).toISOString();
 
@@ -23,21 +27,31 @@ interface Options {
   file?: { size: number; mime: string } | null;
   responses?: Array<Response | Error>;
   messages?: MessageRef[];
+  /** What the tenant's connection resolves to. Default: a working connection (PHONE1 / graph-token). */
+  credentials?: CredentialLookup;
 }
 
 function setup(options: Options = {}) {
   const rows: MessageRow[] = [];
   const signedUrls: string[] = [];
+  const credentialCalls: string[] = [];
   const reactions: Array<{ messageId: string; emoji: string | null; staffId: string }> = [];
   const staff = options.staff === undefined
-    ? { user_id: USER, staff_id: "EMP1001", role: "staff", disabled: false }
+    ? { user_id: USER, staff_id: "EMP1001", role: "staff", disabled: false, tenant_id: TENANT }
     : options.staff;
   const conversation = options.conversation === undefined
-    ? { id: CONV, wa_id: "919800000001", last_inbound_at: hoursAgo(1) }
+    ? { id: CONV, tenant_id: TENANT, connection_id: CONN, wa_id: "919800000001", last_inbound_at: hoursAgo(1) }
     : options.conversation;
   const store: SendStore = {
     getUserId: (jwt) => Promise.resolve(jwt === "good-jwt" ? USER : null),
     getStaff: () => Promise.resolve(staff),
+    getCredentials: (connectionId) => {
+      credentialCalls.push(connectionId);
+      return Promise.resolve(
+        options.credentials ??
+          { ok: true as const, credentials: { connectionId, tenantId: TENANT, phoneId: "PHONE1", token: "graph-token" } },
+      );
+    },
     getConversation: (id) => Promise.resolve(conversation && conversation.id === id ? conversation : null),
     getMessage: (id) => Promise.resolve((options.messages ?? []).find((m) => m.id === id) ?? null),
     downloadFile: () => Promise.resolve(new Uint8Array([1, 2, 3])),
@@ -83,13 +97,13 @@ function setup(options: Options = {}) {
   };
   const { fetchFn, calls } = fakeFetch(options.responses ?? []);
   const handler = createSendHandler({
-    env: { token: "graph-token", phoneId: "PHONE1", graphVersion: "v26.0", dryRun: false, ...options.env },
+    env: { graphVersion: "v26.0", dryRun: false, ...options.env },
     store,
     fetchFn,
     sleep: noSleep,
     now: () => NOW,
   });
-  return { handler, rows, calls, signedUrls, reactions };
+  return { handler, rows, calls, signedUrls, reactions, credentialCalls };
 }
 
 function request(body: unknown, jwt: string | null = "good-jwt") {
@@ -125,7 +139,7 @@ Deno.test("signed-in user without a staff row is 403", async () => {
 });
 
 Deno.test("disabled staff is 403", async () => {
-  const { handler, rows } = setup({ staff: { user_id: USER, staff_id: "EMP1001", role: "staff", disabled: true } });
+  const { handler, rows } = setup({ staff: { user_id: USER, staff_id: "EMP1001", role: "staff", disabled: true, tenant_id: TENANT } });
   const res = await handler(request({ conversation_id: CONV, text: "hi" }));
   assertEquals(res.status, 403);
   await res.body?.cancel();
@@ -173,7 +187,7 @@ Deno.test("unknown conversation is 404", async () => {
 
 Deno.test("closed 24h window: text is refused with 409 and nothing is sent", async () => {
   const { handler, rows, calls } = setup({
-    conversation: { id: CONV, wa_id: "919800000001", last_inbound_at: hoursAgo(25) },
+    conversation: { id: CONV, tenant_id: TENANT, connection_id: CONN, wa_id: "919800000001", last_inbound_at: hoursAgo(25) },
   });
   const res = await handler(request({ conversation_id: CONV, text: "hi" }));
   assertEquals(res.status, 409);
@@ -183,7 +197,7 @@ Deno.test("closed 24h window: text is refused with 409 and nothing is sent", asy
 });
 
 Deno.test("closed 24h window: customer never wrote is also closed", async () => {
-  const { handler } = setup({ conversation: { id: CONV, wa_id: "919800000001", last_inbound_at: null } });
+  const { handler } = setup({ conversation: { id: CONV, tenant_id: TENANT, connection_id: CONN, wa_id: "919800000001", last_inbound_at: null } });
   const res = await handler(request({ conversation_id: CONV, text: "hi" }));
   assertEquals(res.status, 409);
   await res.body?.cancel();
@@ -191,7 +205,7 @@ Deno.test("closed 24h window: customer never wrote is also closed", async () => 
 
 Deno.test("closed 24h window: template is still allowed", async () => {
   const { handler, rows, calls } = setup({
-    conversation: { id: CONV, wa_id: "919800000001", last_inbound_at: hoursAgo(48) },
+    conversation: { id: CONV, tenant_id: TENANT, connection_id: CONN, wa_id: "919800000001", last_inbound_at: hoursAgo(48) },
     responses: [graphOk()],
   });
   const res = await handler(request({ conversation_id: CONV, template: "hello_world" }));
@@ -204,7 +218,7 @@ Deno.test("closed 24h window: template is still allowed", async () => {
 });
 
 Deno.test("dry run success: no call to Meta, fake id, status sent", async () => {
-  const { handler, rows, calls } = setup({ env: { dryRun: true, token: undefined, phoneId: undefined } });
+  const { handler, rows, calls } = setup({ env: { dryRun: true } });
   const res = await handler(request({ conversation_id: CONV, text: " hello there " }));
   assertEquals(res.status, 200);
   const data = await res.json();
@@ -328,8 +342,8 @@ Deno.test("Graph API down after all retries: failed, 502", async () => {
   assertEquals(rows[0].status, "failed");
 });
 
-Deno.test("missing WA_TOKEN without dry run is a 500 and nothing is stored", async () => {
-  const { handler, rows } = setup({ env: { token: undefined } });
+Deno.test("a connection without a token (not dry run) is a 500 and nothing is stored", async () => {
+  const { handler, rows } = setup({ credentials: { ok: false, reason: "no_token" } });
   const res = await handler(request({ conversation_id: CONV, text: "hi" }));
   assertEquals(res.status, 500);
   assertEquals((await res.json()).code, "not_configured");
@@ -412,7 +426,7 @@ Deno.test("reaction: empty emoji removes it; text is not an emoji; window must b
 
   const closed = setup({
     messages: targetMessages,
-    conversation: { id: CONV, wa_id: "919800000001", last_inbound_at: hoursAgo(30) },
+    conversation: { id: CONV, tenant_id: TENANT, connection_id: CONN, wa_id: "919800000001", last_inbound_at: hoursAgo(30) },
   });
   const r3 = await closed.handler(request({ conversation_id: CONV, reaction: { message_id: TARGET, emoji: "\u{2764}\u{FE0F}" } }));
   assertEquals(r3.status, 409);
@@ -512,7 +526,7 @@ Deno.test("WA_MEDIA_MODE=upload: a rejected upload marks the message failed with
 
 Deno.test("customer known only by user id is addressed with 'recipient' instead of 'to'", async () => {
   const { handler, calls } = setup({
-    conversation: { id: CONV, wa_id: "US.13491208655302741918", last_inbound_at: hoursAgo(1) },
+    conversation: { id: CONV, tenant_id: TENANT, connection_id: CONN, wa_id: "US.13491208655302741918", last_inbound_at: hoursAgo(1) },
     responses: [graphOk()],
   });
   const res = await handler(request({ conversation_id: CONV, text: "hi" }));
@@ -542,4 +556,69 @@ Deno.test("Meta error codes become staff-facing messages", async () => {
     assert(String(rows[0].error).includes(expected), `${error.code}: ${rows[0].error}`);
     assert(String(rows[0].error).includes(`(code ${error.code})`));
   }
+});
+
+// --- multi-tenant -----------------------------------------------------------------------------
+
+Deno.test("tenant: a staff member without an active tenant is 403 and nothing is stored or sent", async () => {
+  const { handler, rows, calls } = setup({
+    staff: { user_id: USER, staff_id: "EMP1001", role: "staff", disabled: false, tenant_id: null },
+  });
+  const res = await handler(request({ conversation_id: CONV, text: "hi" }));
+  assertEquals(res.status, 403);
+  await res.body?.cancel();
+  assertEquals(rows.length, 0);
+  assertEquals(calls.length, 0);
+});
+
+Deno.test("tenant: another tenant's conversation is 'not found' (no sending, no storing, no credential lookup)", async () => {
+  const { handler, rows, calls, credentialCalls } = setup({
+    conversation: { id: CONV, tenant_id: OTHER_TENANT, connection_id: CONN, wa_id: "919800000001", last_inbound_at: hoursAgo(1) },
+  });
+  for (const body of [{ text: "hi" }, { template: "hello_world" }, { reaction: { message_id: CONV, emoji: "👍" } }]) {
+    const res = await handler(request({ conversation_id: CONV, ...body }));
+    assertEquals(res.status, 404);
+    assertEquals((await res.json()).code, "not_found");
+  }
+  assertEquals(rows.length, 0);
+  assertEquals(calls.length, 0);
+  assertEquals(credentialCalls.length, 0);
+});
+
+Deno.test("tenant: the message is sent with the credentials of the conversation's own connection", async () => {
+  const { handler, calls, credentialCalls } = setup({
+    responses: [graphOk()],
+    credentials: { ok: true, credentials: { connectionId: CONN, tenantId: TENANT, phoneId: "TENANT_PHONE_77", token: "tenant-specific-token" } },
+  });
+  const res = await handler(request({ conversation_id: CONV, text: "hello" }));
+  assertEquals(res.status, 200);
+  await res.body?.cancel();
+  assertEquals(credentialCalls, [CONN]);
+  assertEquals(calls[0].url, "https://graph.facebook.com/v26.0/TENANT_PHONE_77/messages");
+  assertEquals((calls[0].init?.headers as Record<string, string>).Authorization, "Bearer tenant-specific-token");
+});
+
+Deno.test("tenant: a disconnected connection is 409, nothing is stored and Meta is not called", async () => {
+  const { handler, rows, calls } = setup({ credentials: { ok: false, reason: "inactive" } });
+  const res = await handler(request({ conversation_id: CONV, text: "hi" }));
+  assertEquals(res.status, 409);
+  assertEquals((await res.json()).code, "connection_inactive");
+  assertEquals(rows.length, 0);
+  assertEquals(calls.length, 0);
+});
+
+Deno.test("tenant: the token is never part of any response", async () => {
+  const secret = "super-secret-tenant-token-xyz";
+  const { handler } = setup({
+    responses: [graphOk()],
+    credentials: { ok: true, credentials: { connectionId: CONN, tenantId: TENANT, phoneId: "P1", token: secret } },
+  });
+  const res = await handler(request({ conversation_id: CONV, text: "hello" }));
+  assert(!(await res.text()).includes(secret));
+  const failing = setup({
+    responses: [Response.json({ error: { message: `bad token ${"x"}`, code: 190 } }, { status: 401 })],
+    credentials: { ok: true, credentials: { connectionId: CONN, tenantId: TENANT, phoneId: "P1", token: secret } },
+  });
+  const failed = await failing.handler(request({ conversation_id: CONV, text: "hello" }));
+  assert(!(await failed.text()).includes(secret));
 });

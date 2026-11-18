@@ -1,0 +1,25 @@
+PASS|A: deleting twice is harmless (one row, original deletion time kept)
+PASS|A: flag rows created with hidden_at
+PASS|A: newest visible message is the outgoing one
+PASS|A: search does not return the deleted incoming message
+PASS|A: the new incoming message is visible
+PASS|A: with everything deleted there is no visible preview
+PASS|anonymous caller is denied
+PASS|B deleting for B leaves A's view alone
+PASS|B restoring does not change A's deletion
+PASS|B: cannot see A's flag rows
+PASS|B: deleted outgoing message is not searchable for B
+PASS|B: preview unaffected by A's deletion (still the document)
+PASS|B: search still returns it
+PASS|client cannot delete rows of wa_messages
+PASS|client cannot write flags (not even for itself) except through the functions
+PASS|disabled staff member is denied
+PASS|login without a staff row is denied
+PASS|no message row was removed
+PASS|status is now delivered
+PASS|undo of an unstarred deletion leaves no empty flag row
+PASS|undo: message visible again and star kept
+PASS|unknown message id is refused
+PASS|wa_messages rows unchanged (all columns incl. status, media_path)
+PASS|webhook status update still applies to a message A deleted
+PASS|webhook still ingests a new incoming message

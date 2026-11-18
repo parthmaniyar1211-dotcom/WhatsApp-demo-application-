@@ -5,6 +5,17 @@
 //   POST -> X-Hub-Signature-256 must be a valid HMAC-SHA256 of the raw body with WA_APP_SECRET.
 // Both fail closed: if the secret is not configured, the request is rejected.
 //
+// Multi-tenant routing: every change set carries Meta's phone_number_id (and the WABA id in entry.id).
+// They are looked up in whatsapp_connections; the connection decides the tenant, and every write
+// carries that connection, so one client's events can never land in another client's inbox.
+//
+// An event that CANNOT be routed (no phone number id, unknown number, a WABA id that does not match, a
+// disconnected connection, a suspended client, or the legacy test number that failed to bind) is never
+// silently dropped: it is QUARANTINED (kept for 7 days, readable only by the service role), recorded in the
+// routing ledger with a reason and an event id, logged without any customer data, and can be replayed through
+// this same code once the cause is fixed (webhook-replay function). If the quarantine cannot be written the
+// request fails with 500, so Meta retries and nothing is lost.
+//
 // The handler is built from injected dependencies so it can be tested without Supabase or Meta.
 
 import { HttpError, json, logError, readBody } from "../_shared/http.ts";
@@ -27,12 +38,13 @@ import {
   SAMPLE_WEBP_BASE64,
 } from "../_shared/samples.ts";
 import { staffMessage } from "../_shared/wa_errors.ts";
+import type { ConnectionStore } from "../_shared/connections.ts";
 
 export interface WebhookEnv {
   verifyToken?: string; // WA_VERIFY_TOKEN
-  appSecret?: string; // WA_APP_SECRET
-  token?: string; // WA_TOKEN (needed to download incoming media)
-  phoneId?: string; // WA_PHONE_ID (when set, events for other numbers are ignored)
+  appSecret?: string; // WA_APP_SECRET (the one platform app secret)
+  /** WA_PHONE_ID: only used to bind the legacy test-number connection to its phone number id. */
+  phoneId?: string;
   graphVersion: string;
   dryRun: boolean; // WA_DRY_RUN: use sample files instead of downloading media from Meta
 }
@@ -83,16 +95,78 @@ export interface IncomingMessage {
   contacts: IncomingContact[] | null;
 }
 
-export interface WebhookStore {
+/** The connection a webhook change set was routed to. */
+export interface RoutedConnection {
+  connectionId: string;
+  tenantId: string;
+  wabaId: string | null;
+  status: string;
+  tenantActive: boolean;
+}
+
+export type QuarantineReason =
+  | "no_phone_number_id"
+  | "unknown_phone_number_id"
+  | "waba_mismatch"
+  | "connection_inactive"
+  | "tenant_suspended"
+  | "legacy_bind_failed";
+
+export interface RoutingEvent {
+  eventId: string;
+  phoneNumberId: string | null;
+  wabaId: string | null;
+  field: string;
+  connectionId: string | null;
+  outcome: "routed" | "unrouted" | "inactive" | "mismatch" | "error";
+  reason?: QuarantineReason | "unsupported_field";
+  quarantineId?: string | null;
+  detail?: string;
+}
+
+export interface QuarantineInput {
+  eventId: string;
+  phoneNumberId: string | null;
+  wabaId: string | null;
+  field: string;
+  reason: QuarantineReason;
+  /** The change set exactly as Meta sent it (customer data: the store keeps it server-side only). */
+  payload: unknown;
+}
+
+export interface QuarantinedChange {
+  id: string;
+  eventId: string;
+  wabaId: string | null;
+  field: string;
+  payload: unknown;
+  attempts: number;
+}
+
+export interface WebhookStore extends ConnectionStore {
+  /** The connection that owns a Meta phone number id, or null. */
+  resolveConnection(phoneNumberId: string): Promise<RoutedConnection | null>;
+  /** Binds the legacy test-number connection (global WA_TOKEN) to its phone number id. True when bound now. */
+  bindLegacyConnection(phoneNumberId: string, wabaId: string | null): Promise<boolean>;
+  /** Routing ledger: outcome and reason only, never message content. */
+  recordEvent(event: RoutingEvent): Promise<void>;
+  /** Keeps an unroutable change set. Throws when it cannot be kept (the webhook then answers 500). Returns its id. */
+  quarantine(change: QuarantineInput): Promise<string>;
+  /** Pending quarantined change sets of one Phone Number ID (counts the attempt). */
+  claimQuarantine(phoneNumberId: string, limit: number): Promise<QuarantinedChange[]>;
+  /** Marks a replay done (the stored payload is erased) or failed. */
+  finishQuarantine(id: string, success: boolean, error?: string): Promise<void>;
+  /** Deletes expired quarantined payloads and old ledger rows. Optional; best effort. */
+  purgeExpired?(): Promise<void>;
   /** Returns the new message id, or null when this wa_message_id is already stored. */
-  ingestIncoming(message: IncomingMessage): Promise<string | null>;
+  ingestIncoming(message: IncomingMessage, connectionId: string): Promise<string | null>;
   /** Uploads the file and links it to the message. */
   saveMedia(messageId: string, path: string, bytes: Uint8Array, contentType: string): Promise<void>;
   setMessageError(messageId: string, error: string): Promise<void>;
   /** Returns true when a message row changed. */
-  applyStatus(waMessageId: string, status: string, error: string | null): Promise<boolean>;
+  applyStatus(waMessageId: string, status: string, error: string | null, connectionId: string): Promise<boolean>;
   /** The customer reacted to a message ("" removes the reaction). True when the message exists. */
-  applyReaction(waMessageId: string, emoji: string): Promise<boolean>;
+  applyReaction(waMessageId: string, emoji: string, connectionId: string): Promise<boolean>;
 }
 
 export interface WebhookDeps {
@@ -100,6 +174,7 @@ export interface WebhookDeps {
   store: WebhookStore;
   fetchFn?: FetchFn;
   sleep?: SleepFn;
+  now?: () => number;
 }
 
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -137,8 +212,22 @@ function verifySubscription(req: Request, env: WebhookEnv): Response {
 
 // --- POST: events -----------------------------------------------------------
 
+interface Tally {
+  ok: true;
+  stored: number;
+  duplicates: number;
+  statuses: number;
+  reactions: number;
+  ignored: number;
+  quarantined: number;
+}
+
+const newTally = (): Tally => ({ ok: true, stored: 0, duplicates: 0, statuses: 0, reactions: 0, ignored: 0, quarantined: 0 });
+const PURGE_EVERY_MS = 60 * 60 * 1000;
+let lastPurgeAt = 0;
+
 async function receive(req: Request, deps: WebhookDeps): Promise<Response> {
-  const { env, store } = deps;
+  const { env } = deps;
   if (!env.appSecret) {
     // Fail closed. 503 (not 401) so the misconfiguration is visible and Meta retries later.
     console.error("whatsapp-webhook: WA_APP_SECRET is not set; rejecting request");
@@ -158,7 +247,7 @@ async function receive(req: Request, deps: WebhookDeps): Promise<Response> {
     return json({ error: "Body must be valid JSON" }, 400);
   }
 
-  const result = { ok: true, stored: 0, duplicates: 0, statuses: 0, reactions: 0, ignored: 0 };
+  const result = newTally();
   const root = asRecord(payload);
   if (root.object !== "whatsapp_business_account") {
     result.ignored++;
@@ -167,83 +256,300 @@ async function receive(req: Request, deps: WebhookDeps): Promise<Response> {
 
   for (const entry of asArray(root.entry)) {
     for (const change of asArray(asRecord(entry).changes)) {
-      const changeRecord = asRecord(change);
-      const value = asRecord(changeRecord.value);
-      if (changeRecord.field !== "messages") {
-        result.ignored++;
-        continue;
-      }
-      const phoneId = asRecord(value.metadata).phone_number_id;
-      if (env.phoneId && phoneId !== env.phoneId) {
-        result.ignored++; // event for a different business number
-        continue;
-      }
-
-      // Account-level problems reported by Meta. Log the code only.
-      for (const rawError of asArray(value.errors)) {
-        console.error(`whatsapp-webhook: Meta reported error code ${asRecord(rawError).code ?? "unknown"}`);
-      }
-
-      // Profile names, by phone number and by business-scoped user id.
-      const names = new Map<string, string>();
-      for (const contact of asArray(value.contacts)) {
-        const c = asRecord(contact);
-        const name = asRecord(c.profile).name;
-        if (typeof name !== "string") continue;
-        if (typeof c.wa_id === "string") names.set(c.wa_id, name.slice(0, 200));
-        if (typeof c.user_id === "string") names.set(c.user_id, name.slice(0, 200));
-      }
-
-      for (const rawMessage of asArray(value.messages)) {
-        const message = asRecord(rawMessage);
-
-        // A reaction is not a message of its own: it decorates an earlier message.
-        if (message.type === "reaction") {
-          const reaction = asRecord(message.reaction);
-          if (typeof reaction.message_id !== "string") {
-            result.ignored++;
-            continue;
-          }
-          const emoji = typeof reaction.emoji === "string" ? reaction.emoji : ""; // missing = removed
-          if (await store.applyReaction(reaction.message_id, emoji)) result.reactions++;
-          else result.ignored++;
-          continue;
-        }
-
-        const incoming = normalizeMessage(message, names);
-        if (!incoming) {
-          result.ignored++;
-          continue;
-        }
-        const messageId = await store.ingestIncoming(incoming);
-        if (!messageId) {
-          result.duplicates++;
-          continue;
-        }
-        result.stored++;
-        if (MEDIA_TYPES.has(incoming.type)) {
-          await attachMedia(deps, messageId, incoming, asRecord(message[incoming.type]));
-        }
-      }
-
-      for (const rawStatus of asArray(value.statuses)) {
-        const status = asRecord(rawStatus);
-        if (typeof status.id !== "string" || typeof status.status !== "string" || !STATUSES.has(status.status)) {
-          result.ignored++;
-          continue;
-        }
-        const changed = await store.applyStatus(status.id, status.status, statusError(status));
-        if (changed) result.statuses++;
-        else result.ignored++;
-      }
+      await processChange(deps, asRecord(entry).id, asRecord(change), result, { replay: false, eventId: crypto.randomUUID() });
     }
   }
 
   console.log(
     `whatsapp-webhook: stored=${result.stored} duplicates=${result.duplicates} statuses=${result.statuses} ` +
-      `reactions=${result.reactions} ignored=${result.ignored}`,
+      `reactions=${result.reactions} ignored=${result.ignored} quarantined=${result.quarantined}`,
   );
+  await maybePurge(deps);
   return json(result);
+}
+
+/** Retention: quarantined payloads expire after 7 days, ledger rows after 30. Best effort, at most hourly. */
+async function maybePurge(deps: WebhookDeps): Promise<void> {
+  const now = (deps.now ?? Date.now)();
+  if (!deps.store.purgeExpired || now - lastPurgeAt < PURGE_EVERY_MS) return;
+  lastPurgeAt = now;
+  try {
+    await deps.store.purgeExpired();
+  } catch (err) {
+    logError("whatsapp-webhook: retention purge failed", err);
+  }
+}
+
+export interface ProcessOptions {
+  /** True when a stored change set is being replayed: an unroutable one stays in quarantine instead of being quarantined again. */
+  replay: boolean;
+  eventId: string;
+}
+
+/** What happened to one change set. */
+export type ProcessResult = "processed" | "quarantined" | "still_unroutable" | "ignored";
+
+/**
+ * Routes and stores ONE change set (one entry of "changes"). Used by the webhook and by the replay of
+ * quarantined events, so both take exactly the same path.
+ */
+export async function processChange(
+  deps: WebhookDeps,
+  entryId: unknown,
+  changeRecord: Record<string, unknown>,
+  result: Tally,
+  options: ProcessOptions,
+): Promise<ProcessResult> {
+  const { store } = deps;
+  const value = asRecord(changeRecord.value);
+  const phoneId = asRecord(value.metadata).phone_number_id;
+
+  if (changeRecord.field !== "messages") {
+    // Not an error and not customer data: a field we do not handle yet (Phase 3 adds the Coexistence ones). Counted and visible.
+    result.ignored++;
+    await ledger(deps, {
+      eventId: options.eventId,
+      phoneNumberId: typeof phoneId === "string" ? phoneId : null,
+      wabaId: typeof entryId === "string" ? entryId : null,
+      field: String(changeRecord.field),
+      connectionId: null,
+      outcome: "unrouted",
+      reason: "unsupported_field",
+      detail: "field is not handled",
+    });
+    return "ignored";
+  }
+
+  const routed = await routeChange(deps, phoneId, entryId, changeRecord.field, options.eventId);
+  if (!routed.ok) {
+    if (options.replay) return "still_unroutable"; // keep it in quarantine; the replayer reports it
+    const quarantineId = await store.quarantine({
+      eventId: options.eventId,
+      phoneNumberId: routed.phoneId,
+      wabaId: routed.wabaId,
+      field: String(changeRecord.field),
+      reason: routed.reason,
+      payload: changeRecord,
+    }); // throws when it cannot be kept -> 500 -> Meta retries: never lost
+    await ledger(deps, {
+      eventId: options.eventId,
+      phoneNumberId: routed.phoneId,
+      wabaId: routed.wabaId,
+      field: String(changeRecord.field),
+      connectionId: routed.connectionId,
+      outcome: routed.outcome,
+      reason: routed.reason,
+      quarantineId,
+      detail: routed.detail,
+    });
+    logRouting(routed.reason === "legacy_bind_failed" ? "error" : "warn", {
+      event_id: options.eventId,
+      outcome: "quarantined",
+      reason: routed.reason,
+      phone_number_id: routed.phoneId,
+      connection_id: routed.connectionId,
+      field: String(changeRecord.field),
+    });
+    result.quarantined++;
+    return "quarantined";
+  }
+
+  const connection = routed.connection;
+  const connectionId = connection.connectionId;
+  await ledger(deps, {
+    eventId: options.eventId,
+    phoneNumberId: routed.phoneId,
+    wabaId: routed.wabaId,
+    field: String(changeRecord.field),
+    connectionId,
+    outcome: "routed",
+  });
+  logRouting("info", { event_id: options.eventId, outcome: "routed", connection_id: connectionId, field: String(changeRecord.field), replay: options.replay });
+
+  // Account-level problems reported by Meta. Log the code only.
+  for (const rawError of asArray(value.errors)) {
+    console.error(`whatsapp-webhook: Meta reported error code ${asRecord(rawError).code ?? "unknown"}`);
+  }
+
+  // Profile names, by phone number and by business-scoped user id.
+  const names = new Map<string, string>();
+  for (const contact of asArray(value.contacts)) {
+    const c = asRecord(contact);
+    const name = asRecord(c.profile).name;
+    if (typeof name !== "string") continue;
+    if (typeof c.wa_id === "string") names.set(c.wa_id, name.slice(0, 200));
+    if (typeof c.user_id === "string") names.set(c.user_id, name.slice(0, 200));
+  }
+
+  for (const rawMessage of asArray(value.messages)) {
+    const message = asRecord(rawMessage);
+
+    // A reaction is not a message of its own: it decorates an earlier message.
+    if (message.type === "reaction") {
+      const reaction = asRecord(message.reaction);
+      if (typeof reaction.message_id !== "string") {
+        result.ignored++;
+        continue;
+      }
+      const emoji = typeof reaction.emoji === "string" ? reaction.emoji : ""; // missing = removed
+      if (await store.applyReaction(reaction.message_id, emoji, connectionId)) result.reactions++;
+      else result.ignored++;
+      continue;
+    }
+
+    const incoming = normalizeMessage(message, names);
+    if (!incoming) {
+      result.ignored++;
+      continue;
+    }
+    const messageId = await store.ingestIncoming(incoming, connectionId);
+    if (!messageId) {
+      result.duplicates++;
+      continue;
+    }
+    result.stored++;
+    if (MEDIA_TYPES.has(incoming.type)) {
+      await attachMedia(deps, messageId, incoming, asRecord(message[incoming.type]), connectionId);
+    }
+  }
+
+  for (const rawStatus of asArray(value.statuses)) {
+    const status = asRecord(rawStatus);
+    if (typeof status.id !== "string" || typeof status.status !== "string" || !STATUSES.has(status.status)) {
+      result.ignored++;
+      continue;
+    }
+    const changed = await store.applyStatus(status.id, status.status, statusError(status), connectionId);
+    if (changed) result.statuses++;
+    else result.ignored++;
+  }
+  return "processed";
+}
+
+type RouteFailure = {
+  ok: false;
+  reason: QuarantineReason;
+  outcome: RoutingEvent["outcome"];
+  phoneId: string | null;
+  wabaId: string | null;
+  connectionId: string | null;
+  detail: string;
+};
+type RouteSuccess = { ok: true; connection: RoutedConnection; phoneId: string; wabaId: string | null };
+
+/**
+ * Finds the connection for one change set. A failure carries the REASON; the caller quarantines the event.
+ * Nothing here ever discards an event.
+ */
+async function routeChange(
+  deps: WebhookDeps,
+  rawPhoneId: unknown,
+  rawWabaId: unknown,
+  _field: unknown,
+  _eventId: string,
+): Promise<RouteSuccess | RouteFailure> {
+  const { store, env } = deps;
+  const phoneId = typeof rawPhoneId === "string" && rawPhoneId.length > 0 && rawPhoneId.length <= 64 ? rawPhoneId : null;
+  const wabaId = typeof rawWabaId === "string" && rawWabaId.length <= 64 ? rawWabaId : null;
+  const fail = (reason: QuarantineReason, outcome: RoutingEvent["outcome"], connectionId: string | null, detail: string): RouteFailure => ({
+    ok: false,
+    reason,
+    outcome,
+    phoneId,
+    wabaId,
+    connectionId,
+    detail,
+  });
+
+  if (!phoneId) return fail("no_phone_number_id", "unrouted", null, "the change set has no phone_number_id");
+
+  let connection = await store.resolveConnection(phoneId);
+  let legacyBindFailed = false;
+  // The legacy test number learns its phone number id the first time its own webhook arrives.
+  if (!connection && env.phoneId && phoneId === env.phoneId) {
+    if (await store.bindLegacyConnection(phoneId, wabaId)) connection = await store.resolveConnection(phoneId);
+    else legacyBindFailed = true;
+  }
+  if (!connection) {
+    return legacyBindFailed
+      ? fail("legacy_bind_failed", "error", null, "WA_PHONE_ID matches this number but the legacy connection could not be bound")
+      : fail("unknown_phone_number_id", "unrouted", null, "no connection has this phone number id");
+  }
+  if (connection.wabaId && wabaId && connection.wabaId !== wabaId) {
+    return fail("waba_mismatch", "mismatch", connection.connectionId, "the WABA id does not match the connection");
+  }
+  if (!connection.tenantActive) return fail("tenant_suspended", "inactive", connection.connectionId, "the client is suspended");
+  if (connection.status === "disconnected" || connection.status === "revoked") {
+    return fail("connection_inactive", "inactive", connection.connectionId, `connection ${connection.status}`);
+  }
+  return { ok: true, connection, phoneId, wabaId };
+}
+
+/** The routing ledger must never fail the webhook. */
+async function ledger(deps: WebhookDeps, event: RoutingEvent): Promise<void> {
+  try {
+    await deps.store.recordEvent(event);
+  } catch (err) {
+    logError("whatsapp-webhook: could not record the routing outcome", err);
+  }
+}
+
+/**
+ * One structured log line per routing decision. It carries ids and a reason, never message text,
+ * customer phone numbers, names or payloads.
+ */
+function logRouting(level: "info" | "warn" | "error", fields: Record<string, unknown>): void {
+  const line = JSON.stringify({ evt: "webhook.route", ...fields });
+  if (level === "error") console.error(`ALERT ${line}`);
+  else if (level === "warn") console.warn(line);
+  else console.log(line);
+}
+
+// --- Replay of quarantined events ------------------------------------------------------
+
+export interface ReplaySummary {
+  claimed: number;
+  replayed: number;
+  still_unroutable: number;
+  failed: number;
+  tally: Omit<Tally, "ok">;
+}
+
+/**
+ * Feeds the quarantined events of one Phone Number ID back through the normal routing (admin action, after the
+ * connection was fixed). An event that is still unroutable stays in quarantine; a processed one has its stored
+ * payload erased. Duplicates are harmless (message ids are unique).
+ */
+export async function replayQuarantined(deps: WebhookDeps, phoneNumberId: string, limit = 100): Promise<ReplaySummary> {
+  const rows = await deps.store.claimQuarantine(phoneNumberId, limit);
+  const summary: ReplaySummary = {
+    claimed: rows.length,
+    replayed: 0,
+    still_unroutable: 0,
+    failed: 0,
+    tally: { stored: 0, duplicates: 0, statuses: 0, reactions: 0, ignored: 0, quarantined: 0 },
+  };
+  for (const row of rows) {
+    const tally = newTally();
+    try {
+      const outcome = await processChange(deps, row.wabaId, asRecord(row.payload), tally, { replay: true, eventId: row.eventId });
+      if (outcome === "still_unroutable") {
+        summary.still_unroutable++;
+        await deps.store.finishQuarantine(row.id, false, "still unroutable");
+        continue;
+      }
+      await deps.store.finishQuarantine(row.id, true);
+      summary.replayed++;
+      for (const key of Object.keys(summary.tally) as Array<keyof ReplaySummary["tally"]>) summary.tally[key] += tally[key];
+    } catch (err) {
+      summary.failed++;
+      logError("whatsapp-webhook: replay of one quarantined event failed", err);
+      try {
+        await deps.store.finishQuarantine(row.id, false, err instanceof Error ? err.message.slice(0, 150) : "replay failed");
+      } catch { /* the next replay will try again */ }
+    }
+  }
+  return summary;
 }
 
 const USER_ID = /^[\w.:-]{1,128}$/;
@@ -380,6 +686,7 @@ async function attachMedia(
   messageId: string,
   incoming: IncomingMessage,
   media: Record<string, unknown>,
+  connectionId: string,
 ): Promise<void> {
   const { store } = deps;
   const kind = incoming.type as MediaKind;
@@ -394,7 +701,7 @@ async function attachMedia(
       await store.setMessageError(messageId, "File could not be downloaded: missing media id");
       return;
     }
-    const bytes = await downloadMedia(deps, media.id, kind);
+    const bytes = await downloadMedia(deps, media.id, kind, connectionId);
     if (bytes.byteLength > MAX_STORED_BYTES) {
       await store.setMessageError(messageId, TOO_LARGE);
       return;
@@ -424,13 +731,15 @@ const DRY_RUN_SAMPLES: Record<MediaKind, string> = {
   sticker: SAMPLE_WEBP_BASE64,
 };
 
-async function downloadMedia(deps: WebhookDeps, mediaId: string, kind: MediaKind): Promise<Uint8Array> {
+async function downloadMedia(deps: WebhookDeps, mediaId: string, kind: MediaKind, connectionId: string): Promise<Uint8Array> {
   const { env } = deps;
   if (env.dryRun) return base64ToBytes(DRY_RUN_SAMPLES[kind]);
-  if (!env.token) throw new HttpError(500, "File could not be downloaded: WA_TOKEN is not set");
+  // The file is fetched with the token of the connection that received it, never a shared one.
+  const lookup = await deps.store.getCredentials(connectionId);
+  if (!lookup.ok) throw new HttpError(500, "File could not be downloaded: WhatsApp is not configured for this account");
 
   const retry = { fetchFn: deps.fetchFn, sleep: deps.sleep };
-  const auth = { headers: { Authorization: `Bearer ${env.token}` } };
+  const auth = { headers: { Authorization: `Bearer ${lookup.credentials.token}` } };
 
   // Step 1: ask Graph where the file is. The answer is { url, mime_type, sha256, file_size, id }.
   const metaResponse = await fetchWithRetry(graphUrl(env.graphVersion, mediaId), auth, retry);

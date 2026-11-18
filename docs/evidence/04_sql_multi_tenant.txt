@@ -1,0 +1,102 @@
+# supabase/tests/multi_tenant.sql, 2026-11-16T19:46:57Z
+ result |                                           name                                           
+--------+------------------------------------------------------------------------------------------
+ PASS   | A cannot read tenant B conversation by id
+ PASS   | A cannot read tenant B message by id
+ PASS   | A cannot read the audit log
+ PASS   | A cannot read the token rotation column
+ PASS   | A cannot read the Vault reference column
+ PASS   | A cannot read the webhook ledger
+ PASS   | A cannot use select * on connections (restricted columns)
+ PASS   | a conversation cannot name a connection of another tenant (composite FK)
+ PASS   | a login can belong to one tenant only
+ PASS   | a message cannot carry a tenant different from its conversation (composite FK)
+ PASS   | A no longer sees the moved device token
+ PASS   | a phone number id can belong to only one connection
+ PASS   | A reads only tenant A conversations
+ PASS   | A reads only tenant A messages
+ PASS   | A sees its own file and not the file of tenant B
+ PASS   | A sees only its own connection
+ PASS   | A sees only its own quick reply (same shortcut exists in B)
+ PASS   | A sees only its own tenant row
+ PASS   | A sees only members of its own tenant
+ PASS   | A sees only staff of its own tenant
+ PASS   | A: admin functions are refused
+ PASS   | A: cannot insert into tables directly
+ PASS   | A: delete_message_for_me on a B message is "not found"
+ PASS   | A: mark_conversation_read on a B conversation is "not found"
+ PASS   | A: registered a push device in tenant A
+ PASS   | A: same shortcut allowed in a different tenant (saved /hello-two and it exists in B too)
+ PASS   | A: service-only functions are not callable
+ PASS   | A: set_message_flags (star) on a B message is "not found"
+ PASS   | A: start_conversation creates new chats in tenant A on A's connection
+ PASS   | A: start_conversation with the number tenant B also has returns A's own chat
+ PASS   | A: storage upload into the own folder is allowed
+ PASS   | A: storage upload outside the own folder is refused
+ PASS   | admin cannot read the Vault reference either
+ PASS   | admin does NOT read message content of tenants it does not belong to
+ PASS   | admin overview and tenant summary return counts only
+ PASS   | admin sees audit log and webhook ledger
+ PASS   | admin sees every tenant and connection
+ PASS   | admin still cannot call token functions
+ PASS   | admin suspended tenant B and the audit log recorded it
+ PASS   | and has access again after reactivation
+ PASS   | and not a second time
+ PASS   | anonymous sees and calls nothing
+ PASS   | audit log rows cannot be altered, even by the service role
+ PASS   | B does not see A's push device
+ PASS   | B reads only tenant B data
+ PASS   | B sees its own file only
+ PASS   | B: a device token re-registered by B moves to B
+ PASS   | B's quick reply list does not include A's snippets
+ PASS   | B's start_conversation with the shared number returns B's own chat
+ PASS   | bind_legacy_connection binds the legacy connection once
+ PASS   | bind_legacy_connection refuses a phone number id that belongs to another connection
+ PASS   | create_outgoing for the right tenant works and takes the tenant from the conversation
+ PASS   | create_outgoing refuses a disabled sender
+ PASS   | create_outgoing refuses a sender from another tenant
+ PASS   | disabled membership sees nothing and cannot act
+ PASS   | disabled staff account cannot call RPCs
+ PASS   | disabled staff account sees nothing
+ PASS   | disconnecting B removes its token too
+ PASS   | duplicate wamid is ignored (idempotent)
+ PASS   | each connection decrypts to its own token
+ PASS   | every public table has row level security enabled
+ PASS   | every stored message carries the tenant of its connection
+ PASS   | incoming message on connection A creates a chat in tenant A
+ PASS   | ingest for an unknown connection is refused
+ PASS   | ledger records routing outcomes and stamps last_webhook_at on the routed connection
+ PASS   | login without a tenant sees nothing and cannot act
+ PASS   | no flag rows or read rows were created on B's data by A
+ PASS   | no table row contains token text
+ PASS   | only one connection may use the global WA_TOKEN
+ PASS   | reaction from the right connection is applied
+ PASS   | reaction from the wrong connection is ignored
+ PASS   | resolve_connection maps SQLT_PHONE_A to tenant A and B to tenant B
+ PASS   | resolve_connection reports the suspended tenant
+ PASS   | revoking A deletes its secret and status, and B keeps working
+ PASS   | rotation replaces the token in place and leaves B alone
+ PASS   | search cannot find text that only tenant B has
+ PASS   | search finds own text
+ PASS   | status from the right connection applies, and never goes backwards
+ PASS   | status from the WRONG connection does not change the message
+ PASS   | tenant B conversation, message and quick reply unchanged after A's attacks
+ PASS   | tenant B is locked out the moment it is suspended
+ PASS   | tenant without a WhatsApp connection cannot start a chat (clear error)
+ PASS   | the legacy platform_env connection cannot store a Vault token
+ PASS   | the same customer number on connection B is a different chat in tenant B
+ PASS   | the same customer number twice on one connection is refused
+ PASS   | the same wamid replayed on ANOTHER connection does not copy or overwrite the message
+ PASS   | the vault schema is not granted to anon or authenticated
+ PASS   | two separate Vault secrets exist, only references are stored on the connections
+ PASS   | unknown phone number id resolves to nothing
+ PASS   | unread_counts shows only tenant A
+ PASS   | user of a suspended tenant sees nothing and cannot act
+ PASS   | visible_last_messages only returns tenant A chats
+(92 rows)
+
+ passed | failed 
+--------+--------
+     92 |      0
+(1 row)
+

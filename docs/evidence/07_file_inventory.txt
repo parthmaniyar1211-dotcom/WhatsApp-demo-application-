@@ -1,0 +1,95 @@
+# File inventory and key code locations, 2026-11-16T19:48:34Z, base commit c4eb38e (nothing committed)
+
+## Migrations (supabase/migrations)
+  191 supabase/migrations/20261118000000_tenants_core.sql
+  117 supabase/migrations/20261118000100_vault_tokens.sql
+  532 supabase/migrations/20261118000200_tenant_isolation.sql
+  247 supabase/migrations/20261118000300_routing_admin.sql
+ 1087 total
+
+## Rollback (supabase/rollbacks)
+  531 supabase/rollbacks/20261118_multi_tenant_down.sql
+   65 supabase/rollbacks/rehearse_local.sh
+   30 supabase/rollbacks/schema_signature.sql
+  626 total
+
+## Edge Functions (new or changed)
+  582 supabase/functions/whatsapp-webhook/handler.ts
+  442 supabase/functions/send-whatsapp/handler.ts
+  138 supabase/functions/mark-read/handler.ts
+  236 supabase/functions/admin-staff/handler.ts
+  251 supabase/functions/admin-connections/handler.ts
+   49 supabase/functions/_shared/connections.ts
+   72 supabase/functions/_shared/push.ts
+  451 supabase/functions/_shared/supabase_store.ts
+ 2221 total
+
+## Tests
+   429 supabase/tests/multi_tenant.sql
+   218 supabase/tests/message_delete.sql
+    32 supabase/tests/tenant_migration_fingerprint.sql
+   240 supabase/functions/tests/admin_connections_test.ts
+   278 supabase/functions/tests/admin_staff_test.ts
+    34 supabase/functions/tests/graph_test.ts
+   169 supabase/functions/tests/mark_read_test.ts
+    32 supabase/functions/tests/push_test.ts
+   624 supabase/functions/tests/send_whatsapp_test.ts
+    26 supabase/functions/tests/wa_errors_test.ts
+   965 supabase/functions/tests/whatsapp_webhook_test.ts
+   382 scripts/verify-multi-tenant-local.mjs
+   196 web/e2e/tenancy.spec.ts
+  3625 total
+
+## Web (new or changed)
+   46 web/src/brand.ts
+  128 web/src/App.tsx
+  100 web/src/components/LoginPage.tsx
+   67 web/src/components/ForcePasswordChange.tsx
+   22 web/src/components/ConnectionBanner.tsx
+   67 web/src/hooks/useTenantContext.ts
+  141 web/src/lib/adminApi.ts
+   69 web/src/native/pushService.ts
+   58 web/src/admin/AdminConsole.tsx
+   53 web/src/admin/AuditTab.tsx
+  263 web/src/admin/ClientsTab.tsx
+  266 web/src/admin/ConnectionsTab.tsx
+   53 web/src/admin/CredentialDialog.tsx
+   51 web/src/admin/OverviewTab.tsx
+   36 web/src/admin/useLoader.ts
+ 1420 total
+
+## Where each control lives (file:line)
+current_tenant_ids() derives the tenant from auth.uid()        supabase/migrations/20261118000000_tenants_core.sql:120
+memberships: one tenant per login (UNIQUE user_id)             supabase/migrations/20261118000000_tenants_core.sql:38
+unique phone_number_id platform-wide                           supabase/migrations/20261118000000_tenants_core.sql:67
+Owner (test) tenant + backfill                                 supabase/migrations/20261118000000_tenants_core.sql:165
+audit_logs insert-only revoke                                  supabase/migrations/20261118000300_routing_admin.sql:96
+Vault: store_connection_token                                  supabase/migrations/20261118000100_vault_tokens.sql:14
+Vault: get_connection_token (service role only)                supabase/migrations/20261118000100_vault_tokens.sql:58
+Vault: grants limited to service_role                          supabase/migrations/20261118000100_vault_tokens.sql:105
+Vault boundary comment (service_role direct grant)             supabase/migrations/20261118000100_vault_tokens.sql:109
+composite FK conversations -> connection+tenant                supabase/migrations/20261118000200_tenant_isolation.sql:29
+composite FK messages -> conversation+tenant                   supabase/migrations/20261118000200_tenant_isolation.sql:33
+column-level grant on whatsapp_connections                     supabase/migrations/20261118000200_tenant_isolation.sql:92
+policy conversations_select                                    supabase/migrations/20261118000200_tenant_isolation.sql:130
+policy files_staff_read (storage)                              supabase/migrations/20261118000200_tenant_isolation.sql:152
+RPC pattern: delete_message_for_me tenant check                supabase/migrations/20261118000200_tenant_isolation.sql:247
+ingest_incoming takes tenant from the connection               supabase/migrations/20261118000200_tenant_isolation.sql:365
+apply_message_status requires the owning connection            supabase/migrations/20261118000200_tenant_isolation.sql:476
+resolve_connection (routing by phone_number_id)                supabase/migrations/20261118000300_routing_admin.sql:12
+bind_legacy_connection                                         supabase/migrations/20261118000300_routing_admin.sql:31
+create_client_account (one transaction)                        supabase/migrations/20261118000300_routing_admin.sql:105
+webhook: HMAC check before routing                             supabase/functions/whatsapp-webhook/handler.ts:181
+webhook: routeChange (phone id + WABA + status)                supabase/functions/whatsapp-webhook/handler.ts:286
+webhook: media downloaded with the connection's token          supabase/functions/whatsapp-webhook/handler.ts:511
+send: tenant check (404 for another tenant)                    supabase/functions/send-whatsapp/handler.ts:200
+send: per-connection credentials                               supabase/functions/send-whatsapp/handler.ts:244
+credentials: Vault or legacy env                               supabase/functions/_shared/supabase_store.ts:65
+admin-staff: generated Staff ID / temp password                supabase/functions/admin-staff/handler.ts:155
+admin-connections: manual token flag                           supabase/functions/admin-connections/handler.ts:141
+admin-connections: Embedded Signup flag                        supabase/functions/admin-connections/handler.ts:212
+rollback guard                                                 supabase/rollbacks/20261118_multi_tenant_down.sql:29
+web: forced password gate                                      web/src/App.tsx:66
+web: admin entry only for admins                               web/src/App.tsx:104
+web: brand configuration                                       web/src/brand.ts:24
+push seam: tenant-scoped targeting                             supabase/functions/_shared/push.ts:45

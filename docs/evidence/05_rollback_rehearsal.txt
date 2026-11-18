@@ -1,0 +1,52 @@
+# Rollback rehearsal, 2026-11-16T19:47:19Z
+
+=== 0. local only: connected to 127.0.0.1:54322, database postgres
+tenants before=1
+
+=== 1. schema signature of the PRE-migration database (restored from the backup into a scratch database)
+NOTICE:  database "pre_tenancy" does not exist, skipping
+signature lines: 260
+conversation_reads|660|ff00c6f980305380f1e8d002127f5a9d
+conversations|717|8545ddcf504e21c3e8f488628688a1fb
+media_links_ok|520|520
+message_flags|118|85eeeff81cc5cdb60259d56c509e0e49
+quick_replies|6|e3bee11992351cb5635118984f48824a
+staff|21|89645419db23241a8fe19b050b09ce62
+storage_objects|533|d03e3a1b32d6803304bdeeb6641d6912
+wa_messages|5890|58be54b471db76dc9c2a19b89bc42ee9
+
+=== 2. GUARD: with a second tenant present the rollback must refuse and change nothing
+psql:supabase/rollbacks/20261118_multi_tenant_down.sql:43: ERROR:  Rollback refused: there is more than one tenant (or Owner (test) is missing). Restore the pre-migration backup instead.
+PASS  rollback refused
+PASS  schema unchanged after the refused attempt
+
+=== 3. ROLLBACK
+PASS  down script completed in one transaction
+PASS  rolled-back schema IDENTICAL to the pre-migration schema (260 signature lines)
+PASS  data IDENTICAL before and after the rollback (md5 of every pre-existing table + file list)
+snapshot: tenants=1 connections=1 audit_rows=6 conversation_map=717 message_map=5890
+snapshot copies the Vault reference column: false
+
+=== 4. The ORIGINAL delete-for-me suite from git HEAD, run on the rolled-back schema
+ PASS   | webhook still ingests a new incoming message
+(25 rows)
+PASS  old suite: no failures
+old ingest_incoming(single-tenant payload) works: true
+old apply_message_status(3 args) exists: true
+tenant tables gone: true
+
+=== 5. ROLL FORWARD (apply the four migrations again)
+PASS  applied 20261118000000_tenants_core.sql
+PASS  applied 20261118000100_vault_tokens.sql
+PASS  applied 20261118000200_tenant_isolation.sql
+PASS  applied 20261118000300_routing_admin.sql
+PASS  forward schema IDENTICAL to the schema before the rollback
+PASS  data IDENTICAL after roll-forward
+legacy connection: platform_env/connected, phone number id bound=false (re-learned from the next webhook)
+PASS  message_delete suite passes after roll-forward
+PASS  multi_tenant suite passes after roll-forward
+
+=== 6. clean up scratch objects
+scratch database and snapshot schema removed
+
+RESULT: ALL REHEARSAL CHECKS PASSED

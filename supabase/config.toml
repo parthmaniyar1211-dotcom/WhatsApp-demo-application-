@@ -61,5 +61,14 @@ verify_jwt = true
 [functions.mark-read]
 verify_jwt = true
 
+[functions.admin-connections]
+verify_jwt = true
+
+[functions.complete-password-change]
+verify_jwt = true
+
+[functions.webhook-replay]
+verify_jwt = true
+
 [functions.wa-diagnose]
 verify_jwt = true

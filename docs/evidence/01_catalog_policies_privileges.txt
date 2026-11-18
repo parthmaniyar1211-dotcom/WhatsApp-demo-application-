@@ -1,0 +1,258 @@
+# Evidence: live catalog of the LOCAL database, captured 2026-11-16T19:46:27Z
+# Source: supabase_db_whatsapp-shared-inbox (Postgres 17.11), after migrations 20261118000000..300
+
+## 1. Row level security on every public table
+      tablename       | rls_enabled 
+----------------------+-------------
+ audit_logs           | t
+ conversation_reads   | t
+ conversations        | t
+ message_flags        | t
+ push_devices         | t
+ quick_replies        | t
+ staff                | t
+ tenant_memberships   | t
+ tenants              | t
+ wa_messages          | t
+ webhook_events       | t
+ whatsapp_connections | t
+(12 rows)
+
+## 2. All policies (public + storage.objects), exact definitions
+-[ RECORD 1 ]-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | audit_logs
+policyname | audit_logs_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | is_admin()
+with_check | 
+-[ RECORD 2 ]-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | conversation_reads
+policyname | conversation_reads_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | ((user_id = ( SELECT auth.uid() AS uid)) AND (EXISTS ( SELECT 1                                                                                                                                                                +
+           |    FROM current_tenant_ids() current_tenant_ids(current_tenant_ids))))
+with_check | 
+-[ RECORD 3 ]-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | conversations
+policyname | conversations_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | (tenant_id IN ( SELECT current_tenant_ids() AS current_tenant_ids))
+with_check | 
+-[ RECORD 4 ]-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | message_flags
+policyname | message_flags_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | ((user_id = ( SELECT auth.uid() AS uid)) AND (EXISTS ( SELECT 1                                                                                                                                                                +
+           |    FROM current_tenant_ids() current_tenant_ids(current_tenant_ids))))
+with_check | 
+-[ RECORD 5 ]-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | storage
+tablename  | objects
+policyname | files_staff_read
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | ((bucket_id = 'files'::text) AND (EXISTS ( SELECT 1                                                                                                                                                                            +
+           |    FROM current_tenant_ids() current_tenant_ids(current_tenant_ids))) AND ((((storage.foldername(name))[1] = 'outgoing'::text) AND ((storage.foldername(name))[2] = (( SELECT auth.uid() AS uid))::text)) OR (EXISTS ( SELECT 1+
+           |    FROM wa_messages m                                                                                                                                                                                                          +
+           |   WHERE ((m.media_path = objects.name) AND (m.tenant_id IN ( SELECT current_tenant_ids() AS current_tenant_ids)))))))
+with_check | 
+-[ RECORD 6 ]-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | storage
+tablename  | objects
+policyname | files_staff_upload
+cmd        | INSERT
+roles      | {authenticated}
+using_expr | 
+with_check | ((bucket_id = 'files'::text) AND (EXISTS ( SELECT 1                                                                                                                                                                            +
+           |    FROM current_tenant_ids() current_tenant_ids(current_tenant_ids))) AND ((storage.foldername(name))[1] = 'outgoing'::text) AND ((storage.foldername(name))[2] = (( SELECT auth.uid() AS uid))::text))
+-[ RECORD 7 ]-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | push_devices
+policyname | push_devices_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | (user_id = ( SELECT auth.uid() AS uid))
+with_check | 
+-[ RECORD 8 ]-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | quick_replies
+policyname | quick_replies_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | (tenant_id IN ( SELECT current_tenant_ids() AS current_tenant_ids))
+with_check | 
+-[ RECORD 9 ]-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | staff
+policyname | staff_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | ((user_id = ( SELECT auth.uid() AS uid)) OR is_admin() OR (user_id IN ( SELECT m.user_id                                                                                                                                       +
+           |    FROM tenant_memberships m                                                                                                                                                                                                   +
+           |   WHERE (m.tenant_id IN ( SELECT current_tenant_ids() AS current_tenant_ids)))))
+with_check | 
+-[ RECORD 10 ]------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | tenant_memberships
+policyname | tenant_memberships_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | ((tenant_id IN ( SELECT current_tenant_ids() AS current_tenant_ids)) OR is_admin())
+with_check | 
+-[ RECORD 11 ]------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | tenants
+policyname | tenants_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | ((id IN ( SELECT current_tenant_ids() AS current_tenant_ids)) OR is_admin())
+with_check | 
+-[ RECORD 12 ]------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | wa_messages
+policyname | wa_messages_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | (tenant_id IN ( SELECT current_tenant_ids() AS current_tenant_ids))
+with_check | 
+-[ RECORD 13 ]------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | webhook_events
+policyname | webhook_events_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | is_admin()
+with_check | 
+-[ RECORD 14 ]------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+schemaname | public
+tablename  | whatsapp_connections
+policyname | whatsapp_connections_select
+cmd        | SELECT
+roles      | {authenticated}
+using_expr | ((tenant_id IN ( SELECT current_tenant_ids() AS current_tenant_ids)) OR is_admin())
+with_check | 
+
+## 3. Table privileges of authenticated / anon (public)
+    grantee    |     table_name     | privileges 
+---------------+--------------------+------------
+ authenticated | audit_logs         | SELECT
+ authenticated | conversation_reads | SELECT
+ authenticated | conversations      | SELECT
+ authenticated | message_flags      | SELECT
+ authenticated | push_devices       | SELECT
+ authenticated | quick_replies      | SELECT
+ authenticated | staff              | SELECT
+ authenticated | tenant_memberships | SELECT
+ authenticated | tenants            | SELECT
+ authenticated | wa_messages        | SELECT
+ authenticated | webhook_events     | SELECT
+(11 rows)
+
+## 3b. Column-level SELECT grants on whatsapp_connections (authenticated)
+                                                                                            readable_columns                                                                                            
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ coexistence, created_at, credential_source, display_phone_number, id, label, last_error, last_webhook_at, onboarding_method, phone_number_id, status, tenant_id, token_expires_at, updated_at, waba_id
+(1 row)
+
+                      check                       
+--------------------------------------------------
+ vault_secret_id readable by authenticated: false
+(1 row)
+
+## 3c. audit_logs privileges of service_role
+            privileges            
+----------------------------------
+ INSERT,REFERENCES,SELECT,TRIGGER
+(1 row)
+
+## 4. Function privileges (EXECUTE) and settings
+                                                                        function                                                                        | security_definer |  search_path   | anon | authenticated | service_role 
+--------------------------------------------------------------------------------------------------------------------------------------------------------+------------------+----------------+------+---------------+--------------
+ admin_overview()                                                                                                                                       | t                | search_path="" | f    | t             | t
+ admin_set_tenant_status(p_tenant_id uuid, p_status text)                                                                                               | t                | search_path="" | f    | t             | t
+ admin_tenant_summary()                                                                                                                                 | t                | search_path="" | f    | t             | t
+ apply_customer_reaction(p_wa_message_id text, p_emoji text, p_connection_id uuid)                                                                      | t                | search_path="" | f    | f             | t
+ apply_message_status(p_wa_message_id text, p_status text, p_error text, p_connection_id uuid)                                                          | t                | search_path="" | f    | f             | t
+ bind_legacy_connection(p_phone_number_id text, p_waba_id text)                                                                                         | t                | search_path="" | f    | f             | t
+ create_client_account(p_user_id uuid, p_staff_id text, p_display_name text, p_role text, p_tenant_id uuid, p_client_name text, p_membership_role text) | t                | search_path="" | f    | f             | t
+ create_outgoing(p jsonb)                                                                                                                               | t                | search_path="" | f    | f             | t
+ current_tenant_id()                                                                                                                                    | t                | search_path="" | f    | t             | t
+ current_tenant_ids()                                                                                                                                   | t                | search_path="" | f    | t             | t
+ delete_message_for_me(p_message_id uuid)                                                                                                               | t                | search_path="" | f    | t             | t
+ delete_quick_reply(p_id uuid)                                                                                                                          | t                | search_path="" | f    | t             | t
+ get_connection_token(p_connection_id uuid)                                                                                                             | t                | search_path="" | f    | f             | t
+ ingest_incoming(p jsonb)                                                                                                                               | t                | search_path="" | f    | f             | t
+ is_active_staff()                                                                                                                                      | t                | search_path="" | f    | t             | t
+ is_admin()                                                                                                                                             | t                | search_path="" | f    | t             | t
+ mark_conversation_read(p_conversation_id uuid)                                                                                                         | t                | search_path="" | f    | t             | t
+ message_preview(p_type text, p_body text, p_filename text)                                                                                             | f                | search_path="" | f    | f             | t
+ purge_webhook_events(p_older_than interval)                                                                                                            | t                | search_path="" | f    | f             | t
+ record_webhook_event(p_phone_number_id text, p_waba_id text, p_field text, p_connection_id uuid, p_outcome text, p_detail text)                        | t                | search_path="" | f    | f             | t
+ register_push_device(p_token text, p_platform text)                                                                                                    | t                | search_path="" | f    | t             | t
+ release_conversation(p_conversation_id uuid)                                                                                                           | t                | search_path="" | f    | t             | t
+ rename_contact(p_conversation_id uuid, p_name text)                                                                                                    | t                | search_path="" | f    | t             | t
+ resolve_connection(p_phone_number_id text)                                                                                                             | t                | search_path="" | f    | f             | t
+ restore_message_for_me(p_message_id uuid)                                                                                                              | t                | search_path="" | f    | t             | t
+ revoke_connection_token(p_connection_id uuid, p_status text)                                                                                           | t                | search_path="" | f    | f             | t
+ save_quick_reply(p_id uuid, p_shortcut text, p_body text)                                                                                              | t                | search_path="" | f    | t             | t
+ search_messages(p_query text, p_conversation_id uuid, p_limit integer)                                                                                 | f                | search_path="" | f    | t             | t
+ set_connection_state(p_connection_id uuid, p_status text, p_error text)                                                                                | t                | search_path="" | f    | f             | t
+ set_message_flags(p_message_id uuid, p_starred boolean, p_hidden boolean)                                                                              | t                | search_path="" | f    | t             | t
+ start_conversation(p_phone text, p_name text)                                                                                                          | t                | search_path="" | f    | t             | t
+ store_connection_token(p_connection_id uuid, p_token text, p_expires_at timestamp with time zone)                                                      | t                | search_path="" | f    | f             | t
+ take_conversation(p_conversation_id uuid)                                                                                                              | t                | search_path="" | f    | t             | t
+ unread_counts()                                                                                                                                        | f                | search_path="" | f    | t             | t
+ unregister_push_device(p_token text)                                                                                                                   | t                | search_path="" | f    | t             | t
+ update_conversation_info(p_conversation_id uuid, p_notes text, p_labels text[])                                                                        | t                | search_path="" | f    | t             | t
+ visible_last_messages()                                                                                                                                | f                | search_path="" | f    | t             | t
+ write_audit(p_tenant_id uuid, p_actor_user_id uuid, p_action text, p_target text, p_detail jsonb)                                                      | t                | search_path="" | f    | f             | t
+(38 rows)
+
+## 4b. SECURITY DEFINER functions WITHOUT a pinned search_path (expect none)
+none
+## 5. Constraints that keep tenants apart
+     table_name     |                conname                 |                                                definition                                                
+--------------------+----------------------------------------+----------------------------------------------------------------------------------------------------------
+ conversations      | conversations_connection_tenant_fkey   | FOREIGN KEY (connection_id, tenant_id) REFERENCES whatsapp_connections(id, tenant_id) ON DELETE RESTRICT
+ conversations      | conversations_connection_wa_id_key     | UNIQUE (connection_id, wa_id)
+ conversations      | conversations_id_tenant_key            | UNIQUE (id, tenant_id)
+ wa_messages        | wa_messages_conversation_tenant_fkey   | FOREIGN KEY (conversation_id, tenant_id) REFERENCES conversations(id, tenant_id) ON DELETE CASCADE
+ quick_replies      | quick_replies_tenant_fkey              | FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT
+ quick_replies      | quick_replies_tenant_shortcut_key      | UNIQUE (tenant_id, shortcut)
+ tenant_memberships | tenant_memberships_one_tenant_per_user | UNIQUE (user_id)
+(7 rows)
+
+                indexname                 |                                                                                   indexdef                                                                                   
+------------------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ conversations_connection_wa_user_id_key  | CREATE UNIQUE INDEX conversations_connection_wa_user_id_key ON public.conversations USING btree (connection_id, wa_user_id) WHERE (wa_user_id IS NOT NULL)
+ wa_messages_media_path_idx               | CREATE INDEX wa_messages_media_path_idx ON public.wa_messages USING btree (media_path) WHERE (media_path IS NOT NULL)
+ whatsapp_connections_phone_number_id_key | CREATE UNIQUE INDEX whatsapp_connections_phone_number_id_key ON public.whatsapp_connections USING btree (phone_number_id) WHERE (phone_number_id IS NOT NULL)
+ whatsapp_connections_single_platform_env | CREATE UNIQUE INDEX whatsapp_connections_single_platform_env ON public.whatsapp_connections USING btree (credential_source) WHERE (credential_source = 'platform_env'::text)
+(4 rows)
+
+## 6. Vault: who can touch it
+                                vault_view_select                                 
+----------------------------------------------------------------------------------
+ anon select decrypted_secrets: false | authenticated: false | service_role: true
+(1 row)
+
+config.toml: 8:schemas = ["public"]
+                        ?column?                        
+--------------------------------------------------------
+ vault secrets total=0 ; orphans (no live connection)=0
+(1 row)
+
+## 7. Data in the local database
+ tenants | memberships | connections | conversations | messages | storage_objects | ledger_rows | audit_rows 
+---------+-------------+-------------+---------------+----------+-----------------+-------------+------------
+       1 |          21 |           1 |           717 |     5890 |             533 |           0 |          6
+(1 row)
+

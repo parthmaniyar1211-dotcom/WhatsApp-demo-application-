@@ -1,7 +1,9 @@
 // send-whatsapp: staff reply to a customer.
 //
 // Requires a staff JWT. Enforces:
-//   * the caller is an active (not disabled) staff member,
+//   * the caller is an active (not disabled) staff member of an active tenant,
+//   * the conversation belongs to the caller's tenant (another tenant's chat is "not found"),
+//   * the message is sent with the credentials of the conversation's own WhatsApp connection,
 //   * the WhatsApp 24-hour window for everything except templates,
 //   * file rules (type and size, only from the caller's own upload folder),
 //   * a per-user rate limit.
@@ -19,10 +21,11 @@ import { bearerToken, corsHeaders, HttpError, json, logError, parseJsonObject, r
 import { fetchWithRetry, type FetchFn, graphUrl, type SleepFn } from "../_shared/graph.ts";
 import { cleanMime, outgoingRule, safeFilename, storedContentType } from "../_shared/media.ts";
 import { staffMessage } from "../_shared/wa_errors.ts";
+import { type ConnectionCredentials, type ConnectionStore, requireCredentials } from "../_shared/connections.ts";
 
 export interface SendEnv {
-  token?: string; // WA_TOKEN
-  phoneId?: string; // WA_PHONE_ID
+  // The access token and phone number id are NOT here: they belong to the tenant's connection and
+  // are resolved per request through SendStore.getCredentials.
   graphVersion: string;
   dryRun: boolean; // WA_DRY_RUN
   mediaMode?: "link" | "upload"; // WA_MEDIA_MODE, default "link"
@@ -33,10 +36,14 @@ export interface StaffRow {
   staff_id: string;
   role: string;
   disabled: boolean;
+  /** The caller's active tenant (membership not disabled, tenant active), or null. */
+  tenant_id: string | null;
 }
 
 export interface ConversationRow {
   id: string;
+  tenant_id: string;
+  connection_id: string; // the WhatsApp number this chat belongs to
   wa_id: string; // phone number (digits) or business-scoped user id
   last_inbound_at: string | null;
 }
@@ -64,7 +71,7 @@ export interface NewOutgoing {
   replyTo: string | null; // wamid of the quoted message
 }
 
-export interface SendStore {
+export interface SendStore extends ConnectionStore {
   /** Returns the user id for a valid access token, otherwise null. */
   getUserId(jwt: string): Promise<string | null>;
   getStaff(userId: string): Promise<StaffRow | null>;
@@ -133,7 +140,9 @@ async function send(req: Request, deps: SendDeps): Promise<Response> {
   const userId = jwt ? await store.getUserId(jwt) : null;
   if (!userId) throw new HttpError(401, "Not signed in", "unauthenticated");
   const staff = await store.getStaff(userId);
-  if (!staff || staff.disabled) throw new HttpError(403, "This account is not allowed to send messages", "forbidden");
+  if (!staff || staff.disabled || !staff.tenant_id) {
+    throw new HttpError(403, "This account is not allowed to send messages", "forbidden");
+  }
 
   // 2. What do they want to send?
   const input = parseJsonObject(await readBody(req, MAX_BODY_BYTES));
@@ -187,7 +196,10 @@ async function send(req: Request, deps: SendDeps): Promise<Response> {
 
   // 3. Conversation and the 24-hour window.
   const conversation = await store.getConversation(conversationId);
-  if (!conversation) throw new HttpError(404, "Conversation not found", "not_found");
+  // Another tenant's conversation is reported exactly like a missing one.
+  if (!conversation || conversation.tenant_id !== staff.tenant_id) {
+    throw new HttpError(404, "Conversation not found", "not_found");
+  }
   if (type !== "template" && !isWindowOpen(conversation.last_inbound_at, now)) {
     throw new HttpError(409, WINDOW_CLOSED, "window_closed");
   }
@@ -228,7 +240,8 @@ async function send(req: Request, deps: SendDeps): Promise<Response> {
     mediaVoice = type === "audio" && mediaMime === "audio/ogg" && input.voice === true;
   }
 
-  requireConfigured(env);
+  // The tenant's own credentials (never a shared token). A dry run needs none.
+  const creds = env.dryRun ? null : await requireCredentials(store, conversation.connection_id);
 
   // 7. Store the message first, so it is visible (as "sending") even if the call to Meta is slow.
   const row = await store.createOutgoing({
@@ -258,7 +271,7 @@ async function send(req: Request, deps: SendDeps): Promise<Response> {
         const name = templateName as string;
         graphBody.template = { name, language: { code: TEMPLATES[name].language } };
       } else {
-        const media = await mediaReference(deps, row.media_path as string, mediaMime as string);
+        const media = await mediaReference(deps, creds!, row.media_path as string, mediaMime as string);
         if (!media.ok) throw new GraphFailure(media.error);
         graphBody[type] = {
           ...media.reference,
@@ -267,7 +280,7 @@ async function send(req: Request, deps: SendDeps): Promise<Response> {
           ...(mediaVoice ? { voice: true } : {}),
         };
       }
-      outcome = await callGraph(deps, graphBody);
+      outcome = await callGraph(deps, creds!, graphBody);
     }
   } catch (err) {
     if (err instanceof GraphFailure) {
@@ -305,7 +318,9 @@ async function react(
     throw new HttpError(400, "reaction.emoji must be a single emoji, or empty to remove the reaction", "invalid");
   }
   const conversation = await store.getConversation(conversationId);
-  if (!conversation) throw new HttpError(404, "Conversation not found", "not_found");
+  if (!conversation || conversation.tenant_id !== staff.tenant_id) {
+    throw new HttpError(404, "Conversation not found", "not_found");
+  }
   const target = await targetMessage(store, reaction.message_id, conversationId, "reaction.message_id");
   if (!isWindowOpen(conversation.last_inbound_at, now)) throw new HttpError(409, WINDOW_CLOSED, "window_closed");
 
@@ -313,12 +328,12 @@ async function react(
   if (recent >= RATE_LIMIT_MAX) {
     throw new HttpError(429, "Too many messages. Wait a minute and try again.", "rate_limited");
   }
-  requireConfigured(env);
+  const creds = env.dryRun ? null : await requireCredentials(store, conversation.connection_id);
 
   if (!env.dryRun) {
     let outcome: Outcome;
     try {
-      outcome = await callGraph(deps, {
+      outcome = await callGraph(deps, creds!, {
         ...recipient(conversation.wa_id),
         type: "reaction",
         reaction: { message_id: target.wa_message_id, emoji },
@@ -352,13 +367,6 @@ async function targetMessage(
   return message as MessageRef & { wa_message_id: string };
 }
 
-function requireConfigured(env: SendEnv): void {
-  if (!env.dryRun && (!env.token || !env.phoneId)) {
-    console.error("send-whatsapp: WA_TOKEN or WA_PHONE_ID is not set");
-    throw new HttpError(500, "WhatsApp is not configured on the server", "not_configured");
-  }
-}
-
 export function isWindowOpen(lastInboundAt: string | null, now: number): boolean {
   if (!lastInboundAt) return false;
   const last = Date.parse(lastInboundAt);
@@ -376,6 +384,7 @@ class GraphFailure extends Error {}
 /** How the file is handed to Meta: a short-lived signed link (default) or an uploaded media id. */
 async function mediaReference(
   deps: SendDeps,
+  creds: ConnectionCredentials,
   path: string,
   mime: string,
 ): Promise<{ ok: true; reference: { link: string } | { id: string } } | { ok: false; error: string }> {
@@ -390,8 +399,8 @@ async function mediaReference(
   form.set("type", contentType);
   form.set("file", new Blob([bytes as BlobPart], { type: contentType }), path.split("/").pop() ?? "file");
   const response = await fetchWithRetry(
-    graphUrl(env.graphVersion, `${env.phoneId}/media`),
-    { method: "POST", headers: { Authorization: `Bearer ${env.token}` }, body: form },
+    graphUrl(env.graphVersion, `${creds.phoneId}/media`),
+    { method: "POST", headers: { Authorization: `Bearer ${creds.token}` }, body: form },
     { fetchFn: deps.fetchFn, sleep: deps.sleep },
   );
   if (!response.ok) return { ok: false, error: await graphError(response) };
@@ -400,13 +409,13 @@ async function mediaReference(
   return { ok: true, reference: { id } };
 }
 
-async function callGraph(deps: SendDeps, body: Record<string, unknown>): Promise<Outcome> {
+async function callGraph(deps: SendDeps, creds: ConnectionCredentials, body: Record<string, unknown>): Promise<Outcome> {
   const { env } = deps;
   const response = await fetchWithRetry(
-    graphUrl(env.graphVersion, `${env.phoneId}/messages`),
+    graphUrl(env.graphVersion, `${creds.phoneId}/messages`),
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${env.token}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${creds.token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
     },
     { fetchFn: deps.fetchFn, sleep: deps.sleep },

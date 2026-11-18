@@ -1,0 +1,26 @@
+PASS  new account is created with the server-side lock set
+PASS  temporary password signs in (the login itself works)
+PASS  F1.1 locked session reads NO conversations  (HTTP 200, rows=0)
+PASS  F1.1 locked session reads NO connections
+PASS  locked session can read its own staff row (so the app can show the password screen)
+PASS  F1.1 locked session cannot start a conversation  (HTTP 403)
+PASS  F1.2 writing user_metadata does not unlock
+PASS  F1.2 PATCH on staff cannot clear the flag  (HTTP 403)
+PASS  F1.2 set_must_change_password is not callable by the login  (HTTP 403)
+PASS  F1.3 client cannot write app_metadata  (HTTP 403)
+PASS  F1.4 changing the password with Auth's own endpoint does NOT unlock (only the server function does)  (auth HTTP 200)
+PASS  F1.5 locked session cannot send  (HTTP 403)
+PASS  F1.6 reusing the temporary password is refused  (HTTP 400)
+PASS  F1.6 a short password is refused
+PASS  F1.6 anonymous caller is refused  (HTTP 401)
+PASS  F1.7 the server accepts a valid new password  (HTTP 200)
+PASS  F1.7 the lock is lifted by the server
+PASS  F1.7 the new password signs in
+PASS  F1.7 the temporary password no longer works
+PASS  F1.8 a normal login cannot use the unlock function again  (HTTP 409)
+PASS  F1.9 locked admin cannot call admin RPCs  (HTTP 403)
+PASS  F1.9 locked admin cannot create accounts  (HTTP 403 password_change_required)
+PASS  F1.9 locked admin cannot read routing diagnostics  (HTTP 403)
+cleaned up
+
+ALL F1 CHECKS HELD

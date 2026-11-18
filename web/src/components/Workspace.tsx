@@ -12,9 +12,11 @@ import { ConversationPane } from "./ConversationPane";
 import { NewChatDialog } from "./NewChatDialog";
 import { QuickRepliesDialog } from "./QuickRepliesDialog";
 import { Icon } from "./Icons";
+import { brand } from "../brand";
 
 /** The signed-in app: chat list on the left, the open chat on the right. */
-export function Workspace({ me }: { me: Staff }) {
+/** `onOpenAdmin` is given only to platform admins; the server checks every admin call again. */
+export function Workspace({ me, onOpenAdmin }: { me: Staff; onOpenAdmin?: () => void }) {
   const route = useRoute();
   const online = useOnline();
   const visible = useVisible();
@@ -33,7 +35,7 @@ export function Workspace({ me }: { me: Staff }) {
 
   const totalUnread = Object.entries(inbox.unread).reduce((sum, [id, n]) => sum + (id === openId ? 0 : n), 0);
   useEffect(() => {
-    document.title = totalUnread > 0 ? `(${totalUnread}) Chats` : "Chats";
+    document.title = totalUnread > 0 ? `(${totalUnread}) ${brand.name}` : brand.name;
   }, [totalUnread]);
 
   // Quick replies; reloaded after the dialog changes them.
@@ -62,6 +64,7 @@ export function Workspace({ me }: { me: Staff }) {
                 live={!online ? "offline" : inbox.live}
                 onQuickReplies={() => setDialog("quick")}
                 onPassword={() => setDialog("password")}
+                onAdmin={onOpenAdmin}
               />
             }
           />
@@ -97,13 +100,13 @@ export function Workspace({ me }: { me: Staff }) {
               <span className="welcome-logo" aria-hidden="true">
                 <Icon name="chat" size={64} />
               </span>
-              <h2>Chats for WhatsApp</h2>
+              <h2>{brand.name}</h2>
               <p className="muted">Send and receive messages through your WhatsApp Business number.</p>
               <button type="button" className="button primary" onClick={() => setDialog("new")}>
                 New chat
               </button>
               <p className="muted small welcome-note">
-                <Icon name="lock" size={13} /> Messages go through the official WhatsApp Business API.
+                <Icon name="lock" size={13} /> Messages are sent through your WhatsApp Business number.
               </p>
             </div>
           )}
@@ -173,10 +176,12 @@ function SettingsMenu({
   live,
   onQuickReplies,
   onPassword,
+  onAdmin,
 }: {
   live: string;
   onQuickReplies: () => void;
   onPassword: () => void;
+  onAdmin?: () => void;
 }) {
   const settings = useSettings();
   const [open, setOpen] = useState(false);
@@ -269,6 +274,11 @@ function SettingsMenu({
           <button type="button" role="menuitem" onClick={run(onPassword)}>
             Change password
           </button>
+          {onAdmin && (
+            <button type="button" role="menuitem" onClick={run(onAdmin)} data-testid="menu-admin">
+              Administration
+            </button>
+          )}
           <button type="button" role="menuitem" onClick={() => void supabase.auth.signOut()}>
             Log out
           </button>

@@ -1,0 +1,11 @@
+== deno check (all functions)
+exit=0
+== deno lint
+Checked 34 files
+== check:sql
+OK  whatsapp_setup.sql matches the 10 migration(s).
+== web tsc + eslint + build
+tsc ok
+eslint ok
+
+✓ built in 363ms

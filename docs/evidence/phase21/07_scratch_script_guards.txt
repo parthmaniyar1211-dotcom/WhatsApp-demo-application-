@@ -1,0 +1,35 @@
+$ no confirmation flag
+REFUSED: add --i-confirm-this-is-a-scratch-project
+exit=2
+
+$ production ref
+REFUSED: that is the PRODUCTION project ref
+exit=2
+
+$ url mentions production
+REFUSED: SCRATCH_DB_URL mentions the production project
+exit=2
+
+$ url does not match ref
+REFUSED: SCRATCH_DB_URL does not belong to SCRATCH_PROJECT_REF
+exit=2
+
+$ missing url
+REFUSED: SCRATCH_DB_URL is not set
+exit=2
+
+$ valid scratch (dry run, no connection)
+DRY RUN: guards passed for scratch project abc. Would apply:
+  supabase/migrations/20261114000000_whatsapp_inbox.sql
+  supabase/migrations/20261115000000_whatsapp_features.sql
+  supabase/migrations/20261116000000_contacts.sql
+  supabase/migrations/20261117000000_message_delete.sql
+  supabase/migrations/20261118000000_tenants_core.sql
+  supabase/migrations/20261118000100_vault_tokens.sql
+  supabase/migrations/20261118000200_tenant_isolation.sql
+  supabase/migrations/20261118000300_routing_admin.sql
+  supabase/migrations/20261119000000_password_change_enforcement.sql
+  supabase/migrations/20261119000100_webhook_quarantine.sql
+then: suites, rollback supabase/rollbacks/20261119_phase21_down.sql, roll-forward, compare signatures.
+exit=0
+

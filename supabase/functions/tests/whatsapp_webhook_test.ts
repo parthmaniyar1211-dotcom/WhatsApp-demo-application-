@@ -1,6 +1,11 @@
 import {
   createWebhookHandler,
+  replayQuarantined,
   type IncomingMessage,
+  type QuarantineInput,
+  type QuarantinedChange,
+  type RoutedConnection,
+  type RoutingEvent,
   type WebhookEnv,
   type WebhookStore,
 } from "../whatsapp-webhook/handler.ts";
@@ -9,16 +14,101 @@ import { assert, assertEquals, fakeFetch, noSleep, sign } from "./helpers.ts";
 const SECRET = "test-app-secret";
 const URL_ = "http://localhost/whatsapp-webhook";
 
-function memoryStore() {
-  const messages = new Map<string, IncomingMessage & { id: string; mediaPath?: string; error?: string }>();
+const CONN1 = "c0000000-0000-4000-8000-000000000001";
+const CONN2 = "c0000000-0000-4000-8000-000000000002";
+const TENANT1 = "70000000-0000-4000-8000-000000000001";
+const TENANT2 = "70000000-0000-4000-8000-000000000002";
+
+interface MemoryConnection extends RoutedConnection {
+  phoneId: string;
+  token: string | null;
+}
+
+function defaultConnections(): MemoryConnection[] {
+  return [
+    { connectionId: CONN1, tenantId: TENANT1, wabaId: "WABA1", status: "connected", tenantActive: true, phoneId: "PHONE1", token: "graph-token" },
+  ];
+}
+
+/** Routing methods for tests that build their own store: always the default connection. */
+const routing = {
+  quarantine: () => Promise.resolve("q-adhoc"),
+  claimQuarantine: () => Promise.resolve([] as QuarantinedChange[]),
+  finishQuarantine: () => Promise.resolve(),
+  resolveConnection: () => Promise.resolve(defaultConnections()[0]),
+  bindLegacyConnection: () => Promise.resolve(false),
+  recordEvent: () => Promise.resolve(),
+  getCredentials: (connectionId: string) =>
+    Promise.resolve({ ok: true as const, credentials: { connectionId, tenantId: TENANT1, phoneId: "PHONE1", token: "graph-token" } }),
+};
+
+interface QuarantineRecord extends QuarantineInput {
+  id: string;
+  pending: boolean;
+  attempts: number;
+  lastError?: string;
+}
+
+function memoryStore(connections: MemoryConnection[] = defaultConnections(), legacyUnbound = false, quarantineFails = false) {
+  const events: RoutingEvent[] = [];
+  const quarantined: QuarantineRecord[] = [];
+  let purges = 0;
+  const bound: string[] = [];
+  const credentialLookups: string[] = [];
+  const messages = new Map<string, IncomingMessage & { id: string; mediaPath?: string; error?: string; connectionId?: string }>();
   const files = new Map<string, { bytes: Uint8Array; mime: string }>();
   const outgoing = new Map<string, string>(); // wa_message_id -> status
   const reactions = new Map<string, string>(); // wa_message_id -> emoji
+  const outgoingConn = new Map<string, string>(); // wa_message_id -> connection id (optional ownership)
   const store: WebhookStore = {
-    ingestIncoming(m) {
+    resolveConnection(phoneNumberId) {
+      return Promise.resolve(connections.find((c) => c.phoneId === phoneNumberId) ?? null);
+    },
+    bindLegacyConnection(phoneNumberId, wabaId) {
+      if (!legacyUnbound) return Promise.resolve(false);
+      legacyUnbound = false;
+      bound.push(phoneNumberId);
+      connections.push({ connectionId: CONN1, tenantId: TENANT1, wabaId, status: "connected", tenantActive: true, phoneId: phoneNumberId, token: "graph-token" });
+      return Promise.resolve(true);
+    },
+    recordEvent(event) {
+      events.push(event);
+      return Promise.resolve();
+    },
+    quarantine(change) {
+      if (quarantineFails) return Promise.reject(new Error("quarantine is full"));
+      const record = { ...change, id: `q-${quarantined.length + 1}`, pending: true, attempts: 0 };
+      quarantined.push(record);
+      return Promise.resolve(record.id);
+    },
+    claimQuarantine(phoneNumberId, limit) {
+      const rows = quarantined.filter((q) => q.pending && q.phoneNumberId === phoneNumberId).slice(0, limit);
+      for (const r of rows) r.attempts++;
+      return Promise.resolve(rows.map((r) => ({ id: r.id, eventId: r.eventId, wabaId: r.wabaId, field: r.field, payload: r.payload, attempts: r.attempts })));
+    },
+    finishQuarantine(id, success, error) {
+      const r = quarantined.find((q) => q.id === id)!;
+      if (success) {
+        r.pending = false;
+        r.payload = null; // erased after a successful replay
+      } else r.lastError = error;
+      return Promise.resolve();
+    },
+    purgeExpired() {
+      purges++;
+      return Promise.resolve();
+    },
+    getCredentials(connectionId) {
+      credentialLookups.push(connectionId);
+      const c = connections.find((x) => x.connectionId === connectionId);
+      if (!c) return Promise.resolve({ ok: false as const, reason: "not_found" as const });
+      if (!c.token) return Promise.resolve({ ok: false as const, reason: "no_token" as const });
+      return Promise.resolve({ ok: true as const, credentials: { connectionId, tenantId: c.tenantId, phoneId: c.phoneId, token: c.token } });
+    },
+    ingestIncoming(m, connectionId) {
       if (messages.has(m.waMessageId)) return Promise.resolve(null);
       const id = crypto.randomUUID();
-      messages.set(m.waMessageId, { ...m, id });
+      messages.set(m.waMessageId, { ...m, id, connectionId });
       return Promise.resolve(id);
     },
     saveMedia(messageId, path, bytes, mime) {
@@ -30,28 +120,37 @@ function memoryStore() {
       for (const m of messages.values()) if (m.id === messageId) m.error = error;
       return Promise.resolve();
     },
-    applyStatus(waMessageId, status) {
+    applyStatus(waMessageId, status, _error, connectionId) {
       if (!outgoing.has(waMessageId)) return Promise.resolve(false);
+      const owner = outgoingConn.get(waMessageId);
+      if (owner && owner !== connectionId) return Promise.resolve(false); // a message belongs to one connection
       outgoing.set(waMessageId, status);
       return Promise.resolve(true);
     },
-    applyReaction(waMessageId, emoji) {
+    applyReaction(waMessageId, emoji, connectionId) {
+      const owner = messages.get(waMessageId)?.connectionId ?? outgoingConn.get(waMessageId);
+      if (owner && owner !== connectionId) return Promise.resolve(false);
       if (!messages.has(waMessageId) && !outgoing.has(waMessageId)) return Promise.resolve(false);
       reactions.set(waMessageId, emoji);
       return Promise.resolve(true);
     },
   };
-  return { store, messages, files, outgoing, reactions };
+  return { store, messages, files, outgoing, outgoingConn, reactions, events, bound, credentialLookups, connections, quarantined, purges: () => purges };
 }
 
-function setup(env: Partial<WebhookEnv> = {}, responses: Array<Response | Error> = []) {
-  const memory = memoryStore();
+function setup(
+  env: Partial<WebhookEnv> = {},
+  responses: Array<Response | Error> = [],
+  connections?: MemoryConnection[],
+  legacyUnbound = false,
+  quarantineFails = false,
+) {
+  const memory = memoryStore(connections, legacyUnbound, quarantineFails);
   const { fetchFn, calls } = fakeFetch(responses);
   const handler = createWebhookHandler({
     env: {
       verifyToken: "verify-me",
       appSecret: SECRET,
-      token: "graph-token",
       phoneId: "PHONE1",
       graphVersion: "v26.0",
       dryRun: false,
@@ -161,7 +260,7 @@ Deno.test("text message is stored with the customer name", async () => {
   const { handler, messages } = setup();
   const res = await post(handler, payload(textMessage()));
   assertEquals(res.status, 200);
-  assertEquals(await res.json(), { ok: true, stored: 1, duplicates: 0, statuses: 0, reactions: 0, ignored: 0 });
+  assertEquals(await res.json(), { ok: true, stored: 1, duplicates: 0, statuses: 0, reactions: 0, ignored: 0, quarantined: 0 });
   const stored = messages.get("wamid.TEXT1")!;
   assertEquals(stored.type, "text");
   assertEquals(stored.body, "hi");
@@ -177,7 +276,7 @@ Deno.test("duplicate message id is stored once", async () => {
   assertEquals((await first.json()).stored, 1);
   const second = await post(handler, body);
   assertEquals(second.status, 200);
-  assertEquals(await second.json(), { ok: true, stored: 0, duplicates: 1, statuses: 0, reactions: 0, ignored: 0 });
+  assertEquals(await second.json(), { ok: true, stored: 0, duplicates: 1, statuses: 0, reactions: 0, ignored: 0, quarantined: 0 });
   assertEquals(messages.size, 1);
 });
 
@@ -327,7 +426,7 @@ Deno.test("unsupported file type is recorded without downloading", async () => {
 });
 
 Deno.test("dry run stores a sample file without calling Meta", async () => {
-  const { handler, messages, files, calls } = setup({ dryRun: true, token: undefined });
+  const { handler, messages, files, calls } = setup({ dryRun: true });
   const res = await post(
     handler,
     payload({
@@ -358,13 +457,14 @@ Deno.test("status update is applied to the matching outgoing message", async () 
     }),
   );
   assertEquals(res.status, 200);
-  assertEquals(await res.json(), { ok: true, stored: 0, duplicates: 0, statuses: 1, reactions: 0, ignored: 0 });
+  assertEquals(await res.json(), { ok: true, stored: 0, duplicates: 0, statuses: 1, reactions: 0, ignored: 0, quarantined: 0 });
   assertEquals(outgoing.get("wamid.OUT1"), "delivered");
 });
 
 Deno.test("failed status carries the reason from Meta", async () => {
   let captured: unknown[] = [];
   const store: WebhookStore = {
+    ...routing,
     ingestIncoming: () => Promise.resolve(null),
     saveMedia: () => Promise.resolve(),
     setMessageError: () => Promise.resolve(),
@@ -394,6 +494,7 @@ Deno.test("failed status carries the reason from Meta", async () => {
     "wamid.OUT2",
     "failed",
     "The 24-hour window is closed. Send a template message; free text works again after the customer replies. (code 131047)",
+    CONN1, // the status is applied for the connection the event was routed to
   ]);
 });
 
@@ -404,12 +505,16 @@ Deno.test("unknown status for unknown message is ignored, not an error", async (
   assertEquals((await res.json()).ignored, 2);
 });
 
-Deno.test("events for another phone number id are ignored", async () => {
-  const { handler, messages } = setup({ phoneId: "OTHER" });
+Deno.test("events for a phone number id that has no connection are QUARANTINED, not dropped, and recorded", async () => {
+  const { handler, messages, events, quarantined } = setup({ phoneId: "OTHER" }, [], []);
   const res = await post(handler, payload(textMessage()));
   assertEquals(res.status, 200);
-  assertEquals((await res.json()).ignored, 1);
+  const body = await res.json();
+  assertEquals([body.stored, body.ignored, body.quarantined], [0, 0, 1]);
   assertEquals(messages.size, 0);
+  assertEquals(events.map((e) => [e.outcome, e.reason]), [["unrouted", "unknown_phone_number_id"]]);
+  assertEquals(quarantined.length, 1);
+  assertEquals(events[0].quarantineId, quarantined[0].id);
 });
 
 Deno.test("message types we do not render are recorded as 'other'", async () => {
@@ -473,6 +578,7 @@ Deno.test("database failure returns 500 so Meta retries", async () => {
   const handler = createWebhookHandler({
     env: { appSecret: SECRET, graphVersion: "v26.0", dryRun: false },
     store: {
+      ...routing,
       ingestIncoming: () => Promise.reject(new Error("db down")),
       saveMedia: () => Promise.resolve(),
       setMessageError: () => Promise.resolve(),
@@ -699,7 +805,7 @@ Deno.test("reaction decorates the target message and creates no message; removal
     handler,
     payload({ messages: [{ ...from, id: "wamid.REACT1", type: "reaction", reaction: { message_id: "wamid.OUT9", emoji: "\u{1F44D}" } }] }),
   );
-  assertEquals(await add.json(), { ok: true, stored: 0, duplicates: 0, statuses: 0, reactions: 1, ignored: 0 });
+  assertEquals(await add.json(), { ok: true, stored: 0, duplicates: 0, statuses: 0, reactions: 1, ignored: 0, quarantined: 0 });
   assertEquals(reactions.get("wamid.OUT9"), "\u{1F44D}");
   assertEquals(messages.size, 0);
 
@@ -762,4 +868,207 @@ Deno.test("phone number and user id together: both are kept", async () => {
   await res.body?.cancel();
   assertEquals(messages.get("wamid.BOTH")!.waId, "919800000001");
   assertEquals(messages.get("wamid.BOTH")!.userId, "IN.555");
+});
+
+// --- multi-tenant routing ---------------------------------------------------------------------
+
+function twoTenants(): MemoryConnection[] {
+  return [
+    { connectionId: CONN1, tenantId: TENANT1, wabaId: "WABA1", status: "connected", tenantActive: true, phoneId: "PHONE1", token: "token-of-tenant-1" },
+    { connectionId: CONN2, tenantId: TENANT2, wabaId: "WABA2", status: "connected", tenantActive: true, phoneId: "PHONE2", token: "token-of-tenant-2" },
+  ];
+}
+
+/** Same customer message, but addressed to another business number (phone id) and WABA. */
+function payloadFor(phoneId: string, wabaId: string, value: Record<string, unknown>) {
+  return JSON.stringify({
+    object: "whatsapp_business_account",
+    entry: [{
+      id: wabaId,
+      changes: [{
+        field: "messages",
+        value: { messaging_product: "whatsapp", metadata: { display_phone_number: "1555", phone_number_id: phoneId }, ...value },
+      }],
+    }],
+  });
+}
+
+Deno.test("routing: each phone number id stores into its own connection", async () => {
+  const { handler, messages, events } = setup({}, [], twoTenants());
+  await (await post(handler, payloadFor("PHONE1", "WABA1", textMessage("wamid.ONE")))).body?.cancel();
+  await (await post(handler, payloadFor("PHONE2", "WABA2", textMessage("wamid.TWO")))).body?.cancel();
+  assertEquals(messages.get("wamid.ONE")!.connectionId, CONN1);
+  assertEquals(messages.get("wamid.TWO")!.connectionId, CONN2);
+  assertEquals(events.map((e) => [e.phoneNumberId, e.outcome, e.connectionId]), [["PHONE1", "routed", CONN1], ["PHONE2", "routed", CONN2]]);
+});
+
+Deno.test("routing: a WABA id that does not match the connection is refused (mismatch)", async () => {
+  const { handler, messages, events } = setup({}, [], twoTenants());
+  const res = await post(handler, payloadFor("PHONE1", "WABA2", textMessage("wamid.MISMATCH")));
+  assertEquals((await res.json()).quarantined, 1);
+  assertEquals(messages.size, 0);
+  assertEquals([events[0].outcome, events[0].reason], ["mismatch", "waba_mismatch"]);
+});
+
+Deno.test("routing: a disconnected, revoked or suspended connection stores nothing for now but KEEPS the event in quarantine", async () => {
+  const expected = [["disconnected", "connection_inactive"], ["revoked", "connection_inactive"], ["suspended", "tenant_suspended"]];
+  for (const [i, patch] of ([{ status: "disconnected" }, { status: "revoked" }, { tenantActive: false }] as const).entries()) {
+    const connections = twoTenants().map((c) => (c.connectionId === CONN1 ? { ...c, ...patch } : c));
+    const { handler, messages, events, quarantined } = setup({}, [], connections);
+    const res = await post(handler, payloadFor("PHONE1", "WABA1", textMessage("wamid.INACTIVE")));
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals([body.stored, body.quarantined], [0, 1]);
+    assertEquals(messages.size, 0);
+    assertEquals([events[0].outcome, events[0].reason], ["inactive", expected[i][1]]);
+    assertEquals(quarantined[0].reason, expected[i][1]);
+  }
+});
+
+Deno.test("routing: a change set without phone_number_id is recorded as unrouted", async () => {
+  const { handler, messages, events } = setup();
+  const body = JSON.stringify({
+    object: "whatsapp_business_account",
+    entry: [{ id: "WABA1", changes: [{ field: "messages", value: { ...textMessage(), metadata: {} } }] }],
+  });
+  const res = await post(handler, body);
+  assertEquals((await res.json()).quarantined, 1);
+  assertEquals(messages.size, 0);
+  assertEquals([events[0].outcome, events[0].reason], ["unrouted", "no_phone_number_id"]);
+});
+
+Deno.test("routing: a status or reaction from another connection cannot touch this connection's message", async () => {
+  const { handler, outgoing, outgoingConn, messages } = setup({}, [], twoTenants());
+  outgoing.set("wamid.OUT.OF.TENANT1", "sent");
+  outgoingConn.set("wamid.OUT.OF.TENANT1", CONN1);
+  // tenant 2's number reports a status for tenant 1's message id
+  const res = await post(handler, payloadFor("PHONE2", "WABA2", { statuses: [{ id: "wamid.OUT.OF.TENANT1", status: "read" }] }));
+  assertEquals((await res.json()).statuses, 0);
+  assertEquals(outgoing.get("wamid.OUT.OF.TENANT1"), "sent");
+  // the real owner can
+  const ok = await post(handler, payloadFor("PHONE1", "WABA1", { statuses: [{ id: "wamid.OUT.OF.TENANT1", status: "delivered" }] }));
+  assertEquals((await ok.json()).statuses, 1);
+  assertEquals(outgoing.get("wamid.OUT.OF.TENANT1"), "delivered");
+  // reactions as well
+  await (await post(handler, payloadFor("PHONE1", "WABA1", textMessage("wamid.REACT.TARGET")))).body?.cancel();
+  const react = await post(handler, payloadFor("PHONE2", "WABA2", {
+    messages: [{ from: "919800000001", id: "wamid.R1", timestamp: "1700000000", type: "reaction", reaction: { message_id: "wamid.REACT.TARGET", emoji: "👍" } }],
+  }));
+  assertEquals((await react.json()).reactions, 0);
+  assertEquals(messages.get("wamid.REACT.TARGET")!.connectionId, CONN1);
+});
+
+Deno.test("routing: media is downloaded with the token of the connection that received it", async () => {
+  const { handler, calls } = setup({}, [
+    Response.json({ url: "https://lookaside.example/file", mime_type: "image/jpeg", file_size: 4 }),
+    new Response(new Uint8Array([1, 2, 3, 4]), { headers: { "content-length": "4" } }),
+  ], twoTenants());
+  const res = await post(handler, payloadFor("PHONE2", "WABA2", {
+    messages: [{ from: "919800000001", id: "wamid.IMG2", timestamp: "1700000000", type: "image", image: { id: "MEDIA2", mime_type: "image/jpeg" } }],
+  }));
+  assertEquals((await res.json()).stored, 1);
+  assertEquals((calls[0].init?.headers as Record<string, string>).Authorization, "Bearer token-of-tenant-2");
+  assertEquals((calls[1].init?.headers as Record<string, string>).Authorization, "Bearer token-of-tenant-2");
+});
+
+Deno.test("routing: a connection without a token keeps the message and records why the file is missing", async () => {
+  const connections = twoTenants().map((c) => (c.connectionId === CONN1 ? { ...c, token: null } : c));
+  const { handler, messages, calls } = setup({}, [], connections);
+  const res = await post(handler, payloadFor("PHONE1", "WABA1", {
+    messages: [{ from: "919800000001", id: "wamid.NOTOKEN", timestamp: "1700000000", type: "image", image: { id: "M", mime_type: "image/jpeg" } }],
+  }));
+  assertEquals((await res.json()).stored, 1);
+  assertEquals(calls.length, 0);
+  assert(String(messages.get("wamid.NOTOKEN")!.error).includes("not configured"));
+});
+
+Deno.test("routing: the legacy test number binds to its phone number id on its first webhook, only once", async () => {
+  const { handler, messages, events, bound } = setup({ phoneId: "PHONE1" }, [], [], true);
+  const first = await post(handler, payload(textMessage("wamid.LEGACY1")));
+  assertEquals((await first.json()).stored, 1);
+  assertEquals(bound, ["PHONE1"]);
+  assertEquals(messages.get("wamid.LEGACY1")!.connectionId, CONN1);
+  assertEquals(events[0].outcome, "routed");
+  // another number does NOT bind, even though it arrives on the same function
+  const other = await post(handler, payloadFor("SOMEONE_ELSE", "WABA9", textMessage("wamid.LEGACY2")));
+  assertEquals((await other.json()).quarantined, 1);
+  assertEquals(bound, ["PHONE1"]);
+});
+
+Deno.test("routing: a failure of the routing ledger never fails the webhook", async () => {
+  const memory = memoryStore();
+  memory.store.recordEvent = () => Promise.reject(new Error("ledger down"));
+  const handler = createWebhookHandler({
+    env: { verifyToken: "v", appSecret: SECRET, phoneId: "PHONE1", graphVersion: "v26.0", dryRun: false },
+    store: memory.store,
+    fetchFn: fakeFetch([]).fetchFn,
+    sleep: noSleep,
+  });
+  const res = await post(handler, payload(textMessage("wamid.LEDGER")));
+  assertEquals(res.status, 200);
+  assertEquals((await res.json()).stored, 1);
+});
+
+Deno.test("quarantine failure answers 500 so Meta retries (the event is not lost)", async () => {
+  const { handler, messages } = setup({ phoneId: "OTHER" }, [], [], false, true);
+  const res = await post(handler, payloadFor("UNKNOWN9", "WABA9", textMessage("wamid.NOQ")));
+  assertEquals(res.status, 500);
+  assertEquals(messages.size, 0);
+});
+
+Deno.test("replay: quarantined events of a number are stored once the connection exists, then the payload is erased", async () => {
+  const connections: MemoryConnection[] = [];
+  const memory = memoryStore(connections);
+  const deps = {
+    env: { verifyToken: "v", appSecret: SECRET, phoneId: "OTHER", graphVersion: "v26.0", dryRun: false },
+    store: memory.store,
+    fetchFn: fakeFetch([]).fetchFn,
+    sleep: noSleep,
+  };
+  const handler = createWebhookHandler(deps);
+  await (await post(handler, payloadFor("NEWNUM", "WABAN", textMessage("wamid.Q1")))).body?.cancel();
+  await (await post(handler, payloadFor("NEWNUM", "WABAN", textMessage("wamid.Q2")))).body?.cancel();
+  await (await post(handler, payloadFor("OTHERNUM", "WABAO", textMessage("wamid.Q3")))).body?.cancel();
+  assertEquals(memory.quarantined.length, 3);
+
+  // still no connection: nothing is lost, nothing stored
+  const first = await replayQuarantined(deps, "NEWNUM");
+  assertEquals([first.claimed, first.replayed, first.still_unroutable], [2, 0, 2]);
+  assertEquals(memory.messages.size, 0);
+  assert(memory.quarantined.every((q) => q.payload !== null), "payloads are kept while unroutable");
+
+  // the admin attaches the number to a client, then replays
+  connections.push({ connectionId: CONN2, tenantId: TENANT2, wabaId: "WABAN", status: "connected", tenantActive: true, phoneId: "NEWNUM", token: "t" });
+  const second = await replayQuarantined(deps, "NEWNUM");
+  assertEquals([second.replayed, second.still_unroutable, second.failed], [2, 0, 0]);
+  assertEquals(memory.messages.get("wamid.Q1")!.connectionId, CONN2);
+  assertEquals(memory.messages.get("wamid.Q2")!.connectionId, CONN2);
+  assert(!memory.messages.has("wamid.Q3"), "another phone number id is not replayed");
+  assertEquals(memory.quarantined.filter((q) => q.phoneNumberId === "NEWNUM").map((q) => q.payload), [null, null]);
+  assert(memory.quarantined.find((q) => q.phoneNumberId === "OTHERNUM")!.payload !== null);
+
+  // a second replay finds nothing and cannot duplicate
+  assertEquals((await replayQuarantined(deps, "NEWNUM")).claimed, 0);
+});
+
+Deno.test("logging: routing logs carry ids and reasons but never message text or customer numbers", async () => {
+  const lines: string[] = [];
+  const origLog = console.log, origWarn = console.warn, origError = console.error;
+  console.log = (...a: unknown[]) => lines.push(a.join(" "));
+  console.warn = (...a: unknown[]) => lines.push(a.join(" "));
+  console.error = (...a: unknown[]) => lines.push(a.join(" "));
+  try {
+    const { handler } = setup({ phoneId: "OTHER" }, [], []);
+    const secretText = textMessage("wamid.LOGCHK");
+    (secretText.messages[0] as { text: { body: string } }).text.body = "TOP-SECRET-BODY";
+    await (await post(handler, payloadFor("UNKNOWN7", "WABA7", secretText))).body?.cancel();
+  } finally {
+    console.log = origLog;
+    console.warn = origWarn;
+    console.error = origError;
+  }
+  const all = lines.join("\n");
+  assert(all.includes("unknown_phone_number_id"), "the reason is logged: " + all);
+  assert(!all.includes("TOP-SECRET-BODY"), "message text must not be logged");
+  assert(!all.includes("919800000001"), "customer numbers must not be logged");
 });

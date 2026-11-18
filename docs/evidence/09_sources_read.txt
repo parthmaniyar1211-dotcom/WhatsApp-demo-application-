@@ -1,0 +1,44 @@
+# Sources read for this review (primary documentation only)
+# Retrieved with curl from the build session on 2026-11-16; text extracted from the pages. sha256 = hash of the extracted text, so the reading can be matched to a page version.
+# Meta pages are NOT copied into the repository (their text is Meta's); only URL, "Updated" line and hash are recorded.
+
+https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users
+   updated-on-page: Nov 14, 2026 | bytes-read: 57723 | sha256: 085a689c6e451546
+https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/overview
+   updated-on-page: not shown on the page | bytes-read: 18386 | sha256: 6c73bf7fb9dd8a57
+https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/versions
+   updated-on-page: Oct 29, 2026 | bytes-read: 20328 | sha256: 767175ec0e3a07fa
+https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/version-5
+   updated-on-page: Oct 27, 2026 | bytes-read: 12215 | sha256: 8cce5f50664655d8
+https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/implementation
+   updated-on-page: not shown on the page | bytes-read: 19363 | sha256: aa305ed7ca4f432a
+https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-customers-as-a-tech-provider
+   updated-on-page: not shown on the page | bytes-read: 12476 | sha256: 4a5559967cdbad46
+https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/hosted-es
+   updated-on-page: not shown on the page | bytes-read: 7360 | sha256: eca31dface7df321
+https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/get-started-for-tech-providers
+   updated-on-page: not shown on the page | bytes-read: 6687 | sha256: b4d95d64523ac6e3
+https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/app-review
+   updated-on-page: not shown on the page | bytes-read: 7102 | sha256: 8d4c1d3016ee3263
+https://developers.facebook.com/documentation/business-messaging/whatsapp/access-tokens
+   updated-on-page: not shown on the page | bytes-read: 10017 | sha256: ae8fe8ea4c4a4d13
+https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/history
+   updated-on-page: not shown on the page | bytes-read: 17049 | sha256: 488827905debc952
+https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/smb_app_state_sync
+   updated-on-page: not shown on the page | bytes-read: 6960 | sha256: cf7255893f668eb5
+https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/overview
+   updated-on-page: May 21, 2026 | bytes-read: 18630 | sha256: 84377bcad3b7b019
+https://developers.facebook.com/documentation/business-messaging/whatsapp/reference/whatsapp-business-phone-number/message-api
+   updated-on-page: not shown on the page | bytes-read: 9529 | sha256: 3f211dbc7b51badd
+
+https://supabase.com/docs/guides/database/vault
+   updated-on-page: not shown | bytes-read: 14885 | sha256: 8a39137cdc924547
+https://supabase.com/docs/guides/platform/backups
+   updated-on-page: not shown | bytes-read: 11674 | sha256: bb597378d547e40c
+https://supabase.com/docs/guides/platform/migrating-within-supabase/dashboard-restore
+   updated-on-page: not shown | bytes-read: 9964 | sha256: a6a3158c08546657
+https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore
+   updated-on-page: not shown | bytes-read: 30313 | sha256: c1fb8d166780506f
+
+# NOT readable in this session: Meta's official Postman collection (JavaScript application; needs a Postman API key).
+# NOT read: Meta Groups API page, Hosted ES Coexistence statement beyond the page above, Meta pricing pages, Supabase plan/pricing pages.

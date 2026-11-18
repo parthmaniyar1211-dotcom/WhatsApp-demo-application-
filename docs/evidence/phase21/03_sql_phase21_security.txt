@@ -1,0 +1,39 @@
+PASS|create_client_account sets the requirement to TRUE by default and records it
+PASS|every public table still has row level security (including the new quarantine table)
+PASS|F1: a normal login (flag false) is unaffected
+PASS|F1: a normal platform admin is unaffected
+PASS|F1: an admin on a temporary password has no admin powers (reports, tenant list, audit, routing diagnostics)
+PASS|F1: and its RPCs work again
+PASS|F1: every client RPC is refused (42501)
+PASS|F1: is_admin() and is_active_staff() are false while the flag is set
+PASS|F1: it can still read its OWN staff row, including the flag (the app needs it to show the change screen)
+PASS|F1: it cannot clear the flag itself (no UPDATE privilege) nor call the service-only functions
+PASS|F1: it cannot insert or delete staff rows either
+PASS|F1: it cannot read other staff
+PASS|F1: once the server clears the flag the SAME login reads its own tenant (and only its own)
+PASS|F1: storage is closed (no objects visible, upload into its own folder refused)
+PASS|F1: temporary-password login reads no conversations, messages, quick replies, connections, tenants or memberships
+PASS|F1: unread_counts, search and last-message previews return nothing
+PASS|F1: when the flag is set again (admin reset) an EXISTING session is locked out immediately
+PASS|F8: a client cannot read the quarantine (it holds customer data)
+PASS|F8: a different Phone Number ID claims nothing
+PASS|F8: a failed replay keeps the payload and records why
+PASS|F8: a successful replay ERASES the customer data and marks the event replayed
+PASS|F8: an expired event is not claimed
+PASS|F8: anonymous cannot read the routing diagnostics
+PASS|F8: anonymous cannot touch it
+PASS|F8: claim returns the pending event of that Phone Number ID and counts the attempt
+PASS|F8: clients cannot read the routing diagnostics
+PASS|F8: diagnostics list the unknown Phone Number ID with its pending event count and reason
+PASS|F8: diagnostics NEVER contain message text, customer numbers or payloads
+PASS|F8: diagnostics report an unbound legacy connection (the exact F8 failure) and the retention windows
+PASS|F8: even the platform admin cannot read quarantined payloads
+PASS|F8: no client or admin can call the quarantine functions
+PASS|F8: once the legacy connection is bound the warning clears
+PASS|F8: retention purge removes quarantined payloads older than 7 days and ledger rows older than 30 days, keeps fresh ones
+PASS|F8: the ledger stores event id, reason and quarantine id; the old six-argument call still works
+PASS|F8: when the quarantine is full a new event is REFUSED (53400), not dropped
+PASS|no new SECURITY DEFINER function lacks a pinned search_path
+PASS|Owner (test) preserved: the tenant, its legacy connection and every existing login (flag false) are intact
+PASS|the new Phase 2.1 functions are not executable by anon, and the service-only ones not by authenticated
+38|0

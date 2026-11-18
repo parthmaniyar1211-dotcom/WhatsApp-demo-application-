@@ -1,0 +1,38 @@
+# Data preservation evidence: fingerprint of every pre-existing table and file list (md5 over all ORIGINAL columns, tenant_id/connection_id excluded)
+# Query: supabase/tests/tenant_migration_fingerprint.sql
+
+## A. Taken on the local database BEFORE the four tenant migrations were applied (2026-11-16, build session)
+conversation_reads|585|1f55c2393c2c98e90deb23e56350945d
+conversations|634|a00acccc47aa2d3df298bfdb1b11d8eb
+media_links_ok|452|452
+message_flags|96|76d59eded7d2af563a7fa6ee776a8c2c
+quick_replies|6|e3bee11992351cb5635118984f48824a
+staff|21|89645419db23241a8fe19b050b09ce62
+storage_objects|452|95db8551c54b98670fb817faabb1e057
+wa_messages|5394|99307ab0bf6d445abe7769a608f96335
+
+## B. Taken immediately AFTER applying the four migrations (same database, same moment in the data)
+conversation_reads|585|1f55c2393c2c98e90deb23e56350945d
+conversations|634|a00acccc47aa2d3df298bfdb1b11d8eb
+media_links_ok|452|452
+message_flags|96|76d59eded7d2af563a7fa6ee776a8c2c
+quick_replies|6|e3bee11992351cb5635118984f48824a
+staff|21|89645419db23241a8fe19b050b09ce62
+storage_objects|452|95db8551c54b98670fb817faabb1e057
+wa_messages|5394|99307ab0bf6d445abe7769a608f96335
+
+## C. diff A B
+IDENTICAL (no differing line): every row, id, status, media path and file name is unchanged; every media path still points at an existing Storage object (media_links_ok: n|n)
+
+## D. Rollback and roll-forward
+See docs/evidence/05_rollback_rehearsal.txt: the same fingerprint was compared before vs after the rollback and again after the roll-forward (both IDENTICAL).
+
+## E. Row counts of the baseline
+conversation_reads   585 rows
+conversations        634 rows
+media_links_ok       452 rows
+message_flags        96 rows
+quick_replies        6 rows
+staff                21 rows
+storage_objects      452 rows
+wa_messages          5394 rows

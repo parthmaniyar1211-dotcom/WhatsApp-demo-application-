@@ -1,0 +1,15 @@
+FINAL RUN 2026-11-18T17:08:22Z
+SQL phase21_security: PASS=38 FAIL=0
+SQL multi_tenant: PASS=92 FAIL=0
+SQL message_delete: PASS=25 FAIL=0
+DENO: ok | 148 passed | 0 failed (1s)
+PROBE F1: 23 PASS, 0 FAIL
+INTEGRATION: 117 passed, 0 failed
+check:sql: OK  whatsapp_setup.sql matches the 10 migration(s).
+deno check: OK
+deno lint: Checked 34 files
+web tsc: OK
+web eslint: OK
+web build: OK
+ROLLBACK: ROLLBACK REHEARSAL: ALL CHECKS PASSED  PASS=22 FAIL=0
+SQL after rollback+forward: phase21 PASS=38

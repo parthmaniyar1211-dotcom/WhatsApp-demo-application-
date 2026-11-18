@@ -19,14 +19,17 @@ create temp table ids as
          gen_random_uuid() as m_in, gen_random_uuid() as m_out, gen_random_uuid() as m_doc;
 grant all on ids to public;
 
-insert into public.conversations (id, wa_id, contact_name, last_message_at, last_message_preview)
-  select conv, '19990000001', 'SQL test', now(), 'doc' from ids;
-insert into public.wa_messages (id, conversation_id, wa_message_id, direction, type, body, status, created_at)
-  select m_in, conv, 'wamid.SQLTEST.IN', 'in', 'text', 'incoming hello', 'received', now() - interval '3 min' from ids;
-insert into public.wa_messages (id, conversation_id, wa_message_id, direction, type, body, status, created_at)
-  select m_out, conv, 'wamid.SQLTEST.OUT', 'out', 'text', 'outgoing hello', 'sent', now() - interval '2 min' from ids;
-insert into public.wa_messages (id, conversation_id, wa_message_id, direction, type, media_path, media_mime, media_filename, status, created_at)
-  select m_doc, conv, 'wamid.SQLTEST.DOC', 'in', 'document', 'incoming/19990000001/sqltest.pdf', 'application/pdf', 'a.pdf', 'received', now() - interval '1 min' from ids;
+-- Both test users belong to the "Owner (test)" tenant (created by the multi-tenant migration).
+insert into public.conversations (id, tenant_id, connection_id, wa_id, contact_name, last_message_at, last_message_preview)
+  select conv, (select id from public.tenants where slug = 'owner-test'),
+         (select id from public.whatsapp_connections where credential_source = 'platform_env'),
+         '19990000001', 'SQL test', now(), 'doc' from ids;
+insert into public.wa_messages (id, tenant_id, conversation_id, wa_message_id, direction, type, body, status, created_at)
+  select m_in, (select id from public.tenants where slug = 'owner-test'), conv, 'wamid.SQLTEST.IN', 'in', 'text', 'incoming hello', 'received', now() - interval '3 min' from ids;
+insert into public.wa_messages (id, tenant_id, conversation_id, wa_message_id, direction, type, body, status, created_at)
+  select m_out, (select id from public.tenants where slug = 'owner-test'), conv, 'wamid.SQLTEST.OUT', 'out', 'text', 'outgoing hello', 'sent', now() - interval '2 min' from ids;
+insert into public.wa_messages (id, tenant_id, conversation_id, wa_message_id, direction, type, media_path, media_mime, media_filename, status, created_at)
+  select m_doc, (select id from public.tenants where slug = 'owner-test'), conv, 'wamid.SQLTEST.DOC', 'in', 'document', 'incoming/19990000001/sqltest.pdf', 'application/pdf', 'a.pdf', 'received', now() - interval '1 min' from ids;
 
 create temp table before_snapshot as
   select id, md5(m::text) as h from public.wa_messages m where conversation_id = (select conv from ids);
@@ -105,11 +108,11 @@ select pg_temp.pass('A: with everything deleted there is no visible preview',
 reset role;
 set local role service_role;
 select pg_temp.pass('webhook status update still applies to a message A deleted',
-  (select public.apply_message_status('wamid.SQLTEST.OUT', 'delivered', null)));
+  (select public.apply_message_status('wamid.SQLTEST.OUT', 'delivered', null, (select id from public.whatsapp_connections where credential_source = 'platform_env'))));
 select pg_temp.pass('status is now delivered',
   (select status = 'delivered' from public.wa_messages, ids where id = ids.m_out));
 select pg_temp.pass('webhook still ingests a new incoming message',
-  (select public.ingest_incoming(jsonb_build_object('wa_id','19990000001','wa_message_id','wamid.SQLTEST.NEW','type','text','body','new one')) is not null));
+  (select public.ingest_incoming(jsonb_build_object('connection_id', (select id from public.whatsapp_connections where credential_source = 'platform_env'), 'wa_id','19990000001','wa_message_id','wamid.SQLTEST.NEW','type','text','body','new one')) is not null));
 reset role;
 select pg_temp.as_user(a) from ids;
 select pg_temp.pass('A: the new incoming message is visible',

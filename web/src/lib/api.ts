@@ -4,8 +4,15 @@ import { FunctionsHttpError } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import type { Conversation, Message, MessageFlag, QuickReply, VisibleLast } from "./types";
 
-/** The single login of this app. Only the password is typed; change it under Settings. */
-export const OWNER_EMAIL = "admin1@company.demo";
+/**
+ * Logins are "Staff ID + password". The Staff ID is mapped to a synthetic e-mail address in a domain that
+ * only the sign-in form and the admin-staff function know (it must equal STAFF_EMAIL_DOMAIN on the server).
+ */
+export const STAFF_EMAIL_DOMAIN = (import.meta.env.VITE_STAFF_EMAIL_DOMAIN as string | undefined)?.trim() || "company.demo";
+export const STAFF_ID_PATTERN = /^[A-Za-z0-9]{3,20}$/;
+export function staffEmail(staffId: string): string {
+  return `${staffId.trim().toLowerCase()}@${STAFF_EMAIL_DOMAIN}`;
+}
 export const MAX_TEXT_LENGTH = 4096;
 export const MAX_CAPTION_LENGTH = 1024;
 const BUCKET = "files";
@@ -32,7 +39,7 @@ function baseType(file: File): string {
 }
 
 /** Calls an Edge Function and turns its JSON error into a normal Error. */
-async function callFunction<T>(name: string, body: Record<string, unknown>): Promise<T> {
+export async function callFunction<T>(name: string, body: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase.functions.invoke(name, { body });
   if (!error) return data as T;
   if (error instanceof FunctionsHttpError) {
@@ -237,8 +244,18 @@ export async function renameContact(conversationId: string, name: string): Promi
   rpcError(error);
 }
 
+/** Normal password change for a login that already chose its own password. */
 export async function changePassword(password: string): Promise<void> {
   if (password.length < 8) throw new Error("Use at least 8 characters.");
   const { error } = await supabase.auth.updateUser({ password });
   rpcError(error);
+}
+
+/**
+ * The only way out of the temporary-password lock. The SERVER verifies the session, sets the password and lifts
+ * the lock; the browser cannot clear it itself.
+ */
+export async function completePasswordChange(password: string): Promise<void> {
+  if (password.length < 8) throw new Error("Use at least 8 characters.");
+  await callFunction<{ ok: true }>("complete-password-change", { new_password: password });
 }

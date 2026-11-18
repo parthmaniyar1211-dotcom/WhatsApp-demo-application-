@@ -113,7 +113,7 @@ test("change the password and sign in with the new one (then change it back)", a
 
   await page.getByLabel("Password").fill(env.password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("alert")).toContainText("Wrong password");
+  await expect(page.getByRole("alert")).toContainText("Wrong Staff ID or password");
   await page.getByLabel("Password").fill(temporary);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByTestId("settings-button")).toBeVisible();

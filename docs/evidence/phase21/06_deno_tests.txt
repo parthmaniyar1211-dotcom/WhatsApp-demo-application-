@@ -1,0 +1,553 @@
+running 15 tests from ./supabase/functions/tests/admin_connections_test.ts
+admin-connections: only a platform admin may call it ... ok (31ms)
+admin-connections: create validates the client and the Meta ids ... ok (2ms)
+admin-connections: create makes a pending Vault connection and audits it ... ok (668µs)
+admin-connections: the same phone number id cannot be connected twice ... ok (417µs)
+admin-connections: manual token entry is OFF by default ... ok (346µs)
+admin-connections: with the flag on, a token is stored in Vault, never returned, never audited ... ok (761µs)
+admin-connections: rotation replaces the token and is audited as a rotation ... ok (551µs)
+admin-connections: token validation, expiry in the past, and the legacy connection ... ok (952µs)
+admin-connections: disconnect deletes the Vault token; the legacy number only changes status ... ok (1ms)
+admin-connections: revoke deletes the token; the legacy number cannot be revoked here ... ok (2ms)
+admin-connections: reconnect only applies to a disconnected connection ... ok (1ms)
+admin-connections: update changes labels and ids of a Vault connection but not the legacy ids ... ok (659µs)
+admin-connections: Embedded Signup stays behind its feature flag ... ok (946µs)
+admin-connections: unknown actions and oversized input are refused ... ok (302µs)
+admin-connections: an admin who still has a temporary password is refused ... ok (268µs)
+running 18 tests from ./supabase/functions/tests/admin_staff_test.ts
+admin-staff: unauthenticated is 401, non-admin is 403 ... ok (40ms)
+admin-staff: disabled admin is 403 ... ok (420µs)
+admin-staff: create maps EMP1002 to emp1002@company.demo and creates the client's tenant ...
+------- post-test output -------
+admin-staff: ADMIN1 created EMP1002 (staff)
+----- post-test output end -----
+admin-staff: create maps EMP1002 to emp1002@company.demo and creates the client's tenant ... ok (2ms)
+admin-staff: without a password a random temporary one is generated and returned once ...
+------- post-test output -------
+admin-staff: ADMIN1 created CCQGU5RC (staff)
+----- post-test output end -----
+admin-staff: without a password a random temporary one is generated and returned once ... ok (1ms)
+admin-staff: generated Staff IDs are unique even when a candidate is taken ...
+------- post-test output -------
+admin-staff: ADMIN1 created CCBBBBBB (staff)
+----- post-test output end -----
+admin-staff: generated Staff IDs are unique even when a candidate is taken ... ok (1ms)
+admin-staff: generator has no modulo bias and only uses the alphabet ... ok (218µs)
+admin-staff: a staff login needs a client name or an existing tenant, never both ... ok (1ms)
+admin-staff: another login for an existing client joins its tenant as an agent ...
+------- post-test output -------
+admin-staff: ADMIN1 created EMP7000 (staff)
+admin-staff failed: tenant not found
+----- post-test output end -----
+admin-staff: another login for an existing client joins its tenant as an agent ... ok (1ms)
+admin-staff: a platform admin can be created without a tenant ...
+------- post-test output -------
+admin-staff: ADMIN1 created OPS1 (admin)
+----- post-test output end -----
+admin-staff: a platform admin can be created without a tenant ... ok (448µs)
+admin-staff: create validates id, password and role ... ok (1ms)
+admin-staff: duplicate staff id is 409 ...
+------- post-test output -------
+admin-staff: ADMIN1 created EMP4000 (staff)
+----- post-test output end -----
+admin-staff: duplicate staff id is 409 ... ok (599µs)
+admin-staff: auth user is removed again when the account (staff row + tenant) cannot be created ...
+------- post-test output -------
+admin-staff failed: insert failed
+----- post-test output end -----
+admin-staff: auth user is removed again when the account (staff row + tenant) cannot be created ... ok (365µs)
+admin-staff: disable and enable ...
+------- post-test output -------
+admin-staff: ADMIN1 set EMP1001 disabled=true
+admin-staff: ADMIN1 set EMP1001 disabled=false
+----- post-test output end -----
+admin-staff: disable and enable ... ok (916µs)
+admin-staff: an admin cannot disable themselves ... ok (273µs)
+admin-staff: reset password (chosen by the admin) ...
+------- post-test output -------
+admin-staff: ADMIN1 reset the password of EMP1001
+----- post-test output end -----
+admin-staff: reset password (chosen by the admin) ... ok (852µs)
+admin-staff: reset password without a password generates a temporary one, returned once ...
+------- post-test output -------
+admin-staff: ADMIN1 reset the password of EMP1001
+----- post-test output end -----
+admin-staff: reset password without a password generates a temporary one, returned once ... ok (435µs)
+admin-staff: every administrative action is audited with its client, and passwords never are ...
+------- post-test output -------
+admin-staff: ADMIN1 created EMP8000 (staff)
+admin-staff: ADMIN1 set EMP1001 disabled=true
+admin-staff: ADMIN1 set EMP1001 disabled=false
+admin-staff: ADMIN1 reset the password of EMP1001
+----- post-test output end -----
+admin-staff: every administrative action is audited with its client, and passwords never are ... ok (976µs)
+admin-staff: an admin who still has a temporary password is refused, nothing is created ... ok (298µs)
+running 2 tests from ./supabase/functions/tests/graph_test.ts
+fetchWithRetry backs off exponentially: 500 ms, then 1000 ms ... ok (36ms)
+fetchWithRetry returns the last 5xx response after the final attempt ... ok (596µs)
+running 10 tests from ./supabase/functions/tests/mark_read_test.ts
+mark-read: sends status=read for the newest incoming message ... ok (44ms)
+mark-read: typing=true adds the typing indicator ... ok (775µs)
+mark-read: nothing is sent when already marked, when there is no message, or when it is too old ... ok (831µs)
+mark-read: dry run records the read without calling Meta ... ok (687µs)
+mark-read: a Meta error is reported but never fails the request ...
+------- post-test output -------
+mark-read: Meta refused (HTTP 401)
+----- post-test output end -----
+mark-read: a Meta error is reported but never fails the request ... ok (786µs)
+mark-read: auth and input checks ... ok (1ms)
+mark-read: another tenant's conversation is 'not found' and Meta is not called ... ok (336µs)
+mark-read: a login without an active tenant is 403 ... ok (223µs)
+mark-read: uses the connection's own credentials ... ok (333µs)
+mark-read: a disconnected number never blocks reading (reported, not an error) ... ok (247µs)
+running 9 tests from ./supabase/functions/tests/password_change_test.ts
+password change: needs a valid session ... ok (31ms)
+password change: a flagged login sets its own password, the lock is lifted, others are signed out, audit has no password ...
+------- post-test output -------
+complete-password-change: EMP1 chose a new password
+----- post-test output end -----
+password change: a flagged login sets its own password, the lock is lifted, others are signed out, audit has no password ... ok (1ms)
+password change: the temporary password cannot be reused ... ok (411µs)
+password change: short and long passwords are refused and the lock stays ... ok (657µs)
+password change: a stale or undated session must sign in again ... ok (522µs)
+password change: unflagged, disabled or unknown logins cannot use it ... ok (444µs)
+password change: if the lock cannot be lifted the caller is told, and the lock stays ...
+------- post-test output -------
+complete-password-change: could not lift the lock: db down
+complete-password-change: could not lift the lock: db down
+complete-password-change: could not lift the lock: db down
+----- post-test output end -----
+password change: if the lock cannot be lifted the caller is told, and the lock stays ... ok (463µs)
+password change: attempts are rate limited per login ... ok (1ms)
+webhook-replay: only an active admin without a pending password change may replay ...
+------- post-test output -------
+webhook-replay: A replayed 0/0 (still unroutable 0, failed 0)
+----- post-test output end -----
+webhook-replay: only an active admin without a pending password change may replay ... ok (1ms)
+running 4 tests from ./supabase/functions/tests/push_test.ts
+push: only devices of the message's own tenant are targeted ... ok (797µs)
+push: the sender of an action is not notified about it, and duplicate tokens are sent once ... ok (165µs)
+push: message text stays out of the notification unless previews are on ... ok (318µs)
+push: with no provider configured nothing is sent and the reason is reported ... ok (139µs)
+running 39 tests from ./supabase/functions/tests/send_whatsapp_test.ts
+unauthenticated: no token is 401 ... ok (16ms)
+unauthenticated: invalid token is 401 ... ok (1ms)
+signed-in user without a staff row is 403 ... ok (484µs)
+disabled staff is 403 ... ok (336µs)
+empty message is 400 ... ok (1ms)
+invalid input is 400 ... ok (2ms)
+unknown conversation is 404 ... ok (466µs)
+closed 24h window: text is refused with 409 and nothing is sent ... ok (325µs)
+closed 24h window: customer never wrote is also closed ... ok (532µs)
+closed 24h window: template is still allowed ...
+------- post-test output -------
+send-whatsapp: message=944612cc-8d4d-4308-ab5b-8bf071c762e5 type=template dry_run=false ok=true
+----- post-test output end -----
+closed 24h window: template is still allowed ... ok (2ms)
+dry run success: no call to Meta, fake id, status sent ...
+------- post-test output -------
+send-whatsapp: message=30f8ca6e-1902-4323-b6ed-72ada7317af7 type=text dry_run=true ok=true
+----- post-test output end -----
+dry run success: no call to Meta, fake id, status sent ... ok (477µs)
+real send: text goes to the Graph API with the bearer token ...
+------- post-test output -------
+send-whatsapp: message=8e8be782-b268-4596-bd2e-c629c421f908 type=text dry_run=false ok=true
+----- post-test output end -----
+real send: text goes to the Graph API with the bearer token ... ok (576µs)
+real send: image uses a short-lived signed URL ...
+------- post-test output -------
+send-whatsapp: message=97c752ee-d7c2-49d8-9252-1eda047d567c type=image dry_run=false ok=true
+----- post-test output end -----
+real send: image uses a short-lived signed URL ... ok (857µs)
+real send: PDF is sent as a document with its file name ...
+------- post-test output -------
+send-whatsapp: message=d2aec968-4362-4e97-8fd9-3590d25c0d9d type=document dry_run=false ok=true
+----- post-test output end -----
+real send: PDF is sent as a document with its file name ... ok (1ms)
+file checks: too large, wrong type, missing ... ok (1ms)
+rate limit: 429 after too many recent sends ... ok (713µs)
+Graph API rejection: message is marked failed with the reason, 502 ...
+------- post-test output -------
+send-whatsapp: message=4e37af5d-a7a3-4de3-af10-0f651ba651dc type=text dry_run=false ok=false
+----- post-test output end -----
+Graph API rejection: message is marked failed with the reason, 502 ... ok (1ms)
+Graph API 5xx is retried with backoff, then succeeds ...
+------- post-test output -------
+send-whatsapp: message=e6b1452a-f3e7-4b31-85b3-1e0ac7f5fd8c type=text dry_run=false ok=true
+----- post-test output end -----
+Graph API 5xx is retried with backoff, then succeeds ... ok (904µs)
+Graph API down after all retries: failed, 502 ...
+------- post-test output -------
+send-whatsapp: message=5d730019-46b1-43b5-89ac-ef63d4e5eb54 type=text dry_run=false ok=false
+send-whatsapp: Graph API call failed: network
+----- post-test output end -----
+Graph API down after all retries: failed, 502 ... ok (974µs)
+a connection without a token (not dry run) is a 500 and nothing is stored ...
+------- post-test output -------
+connection 55555555-5555-4555-8555-555555555555: no_token
+----- post-test output end -----
+a connection without a token (not dry run) is a 500 and nothing is stored ... ok (701µs)
+CORS preflight is answered ... ok (349µs)
+reply: the quoted message goes into the Cloud API context field ...
+------- post-test output -------
+send-whatsapp: message=488525b5-f365-4b9b-ad3e-17d0dce0de9c type=text dry_run=false ok=true
+----- post-test output end -----
+reply: the quoted message goes into the Cloud API context field ... ok (639µs)
+reply: a message from another chat, or one WhatsApp never got, cannot be quoted ... ok (667µs)
+reaction: sent as a reaction message and stored on the target ...
+------- post-test output -------
+send-whatsapp: reaction on message=33333333-3333-4333-8333-333333333333 dry_run=false
+----- post-test output end -----
+reaction: sent as a reaction message and stored on the target ... ok (1ms)
+reaction: empty emoji removes it; text is not an emoji; window must be open ...
+------- post-test output -------
+send-whatsapp: reaction on message=33333333-3333-4333-8333-333333333333 dry_run=true
+----- post-test output end -----
+reaction: empty emoji removes it; text is not an emoji; window must be open ... ok (953µs)
+reaction: when Meta refuses, nothing is stored and the reason is mapped ... ok (395µs)
+voice note: OGG/Opus is sent as audio with voice=true ...
+------- post-test output -------
+send-whatsapp: message=af9ffb1e-77da-403e-9c7d-46f7ee2fb3f7 type=audio dry_run=false ok=true
+----- post-test output end -----
+voice note: OGG/Opus is sent as audio with voice=true ... ok (566µs)
+audio in another format is sent as plain audio; a caption on audio is refused ...
+------- post-test output -------
+send-whatsapp: message=fda97640-6112-49b2-9fc4-19a212f1aaa6 type=audio dry_run=false ok=true
+----- post-test output end -----
+audio in another format is sent as plain audio; a caption on audio is refused ... ok (1ms)
+video: MP4 is sent as video with a caption ...
+------- post-test output -------
+send-whatsapp: message=b4f92ab5-9d6a-481d-b603-d9510d8f4848 type=video dry_run=false ok=true
+----- post-test output end -----
+video: MP4 is sent as video with a caption ... ok (571µs)
+photo larger than Meta's 5 MB image limit is refused before sending ... ok (405µs)
+WA_MEDIA_MODE=upload: the file is uploaded to Meta and sent by media id ...
+------- post-test output -------
+send-whatsapp: message=4112fcc3-d3da-473a-9183-3e41adede041 type=audio dry_run=false ok=true
+----- post-test output end -----
+WA_MEDIA_MODE=upload: the file is uploaded to Meta and sent by media id ... ok (1ms)
+WA_MEDIA_MODE=upload: a rejected upload marks the message failed with the reason ...
+------- post-test output -------
+send-whatsapp: message=0cbc14e9-70b9-42ac-928d-f154e2e5e88d type=image dry_run=false ok=false
+----- post-test output end -----
+WA_MEDIA_MODE=upload: a rejected upload marks the message failed with the reason ... ok (679µs)
+customer known only by user id is addressed with 'recipient' instead of 'to' ...
+------- post-test output -------
+send-whatsapp: message=e5e7c42c-0b59-4261-884e-4be069403b51 type=text dry_run=false ok=true
+----- post-test output end -----
+customer known only by user id is addressed with 'recipient' instead of 'to' ... ok (479µs)
+Meta error codes become staff-facing messages ...
+------- post-test output -------
+send-whatsapp: message=d90d5d37-a932-4fef-b438-cba88e3d1258 type=text dry_run=false ok=false
+send-whatsapp: message=a21a399d-ee61-4694-a80d-c363a2ebfe48 type=text dry_run=false ok=false
+send-whatsapp: message=285f9f36-bb31-4fb1-b17e-417ee188e20a type=text dry_run=false ok=false
+send-whatsapp: message=2a5f61b3-7ae6-4403-b622-222bfdda939f type=text dry_run=false ok=false
+send-whatsapp: message=9afa317f-8f38-4a07-bb58-c378d3f2b5d8 type=text dry_run=false ok=false
+send-whatsapp: message=ba17efb0-6508-41ed-ae5b-3b6b6f69928a type=text dry_run=false ok=false
+----- post-test output end -----
+Meta error codes become staff-facing messages ... ok (2ms)
+tenant: a staff member without an active tenant is 403 and nothing is stored or sent ... ok (436µs)
+tenant: another tenant's conversation is 'not found' (no sending, no storing, no credential lookup) ... ok (1ms)
+tenant: the message is sent with the credentials of the conversation's own connection ...
+------- post-test output -------
+send-whatsapp: message=4e339965-2810-4579-bb79-48d9c8798b1b type=text dry_run=false ok=true
+----- post-test output end -----
+tenant: the message is sent with the credentials of the conversation's own connection ... ok (571µs)
+tenant: a disconnected connection is 409, nothing is stored and Meta is not called ... ok (320µs)
+tenant: the token is never part of any response ...
+------- post-test output -------
+send-whatsapp: message=f64056df-f3dc-4c8f-8bc7-cdebf3202ecf type=text dry_run=false ok=true
+send-whatsapp: message=a1277eda-fdb5-4523-bd7e-1556dc5a275a type=text dry_run=false ok=false
+----- post-test output end -----
+tenant: the token is never part of any response ... ok (742µs)
+running 2 tests from ./supabase/functions/tests/wa_errors_test.ts
+staffMessage: the cases staff will actually meet ... ok (844µs)
+staffMessage: the code is always shown; unknown codes keep Meta's text ... ok (186µs)
+running 49 tests from ./supabase/functions/tests/whatsapp_webhook_test.ts
+verification: correct token echoes hub.challenge ... ok (13ms)
+verification: wrong token is rejected ... ok (1ms)
+verification: fails closed when WA_VERIFY_TOKEN is not set ... ok (451µs)
+bad signature returns 401 and stores nothing ... ok (3ms)
+missing or malformed signature returns 401 ... ok (711µs)
+signature is checked against the exact raw body ... ok (788µs)
+fails closed when WA_APP_SECRET is not set ...
+------- post-test output -------
+whatsapp-webhook: WA_APP_SECRET is not set; rejecting request
+----- post-test output end -----
+fails closed when WA_APP_SECRET is not set ... ok (1ms)
+text message is stored with the customer name ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"a76eb9de-654c-4545-97b0-52ec2175d71e","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+text message is stored with the customer name ... ok (2ms)
+duplicate message id is stored once ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"7cfa65af-b92e-4297-abc0-87fd3c6f2c5f","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+{"evt":"webhook.route","event_id":"292bef44-a56a-4f12-94c2-30ee214aba03","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=1 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+duplicate message id is stored once ... ok (1ms)
+image message: file is downloaded from Meta and stored privately ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"8045c398-f581-4a6b-9792-1f1dc5febc1e","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+image message: file is downloaded from Meta and stored privately ... ok (2ms)
+document message keeps its file name ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"730c2e08-38a5-452c-8d62-ebb1fbdf15e1","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+document message keeps its file name ... ok (1ms)
+media download retries on 5xx with backoff, then succeeds ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"a76247ea-0a2f-4451-a742-78bfb6ca1c25","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+media download retries on 5xx with backoff, then succeeds ... ok (1ms)
+media failure keeps the message and records the reason (still 200) ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"f4b9907d-3dd4-4c43-8c08-d308429056f9","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: media for message c6818fbd-3728-4f93-9701-4fefb6398478 failed: File could not be downloaded (HTTP 404)
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+media failure keeps the message and records the reason (still 200) ... ok (1ms)
+file larger than 16 MB is not downloaded ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"f856d57a-821c-4656-9a33-140d2dd61451","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: media for message 12a22728-8110-4709-875f-0b96d0a1390b failed: File is larger than 16 MB and was not stored
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+file larger than 16 MB is not downloaded ... ok (892µs)
+unsupported file type is recorded without downloading ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"e9572afa-9d0b-4025-ab07-d71c9ecdf0e9","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+unsupported file type is recorded without downloading ... ok (680µs)
+dry run stores a sample file without calling Meta ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"9b07bd28-fa3f-4f05-816c-bee3d630ec96","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+dry run stores a sample file without calling Meta ... ok (1ms)
+status update is applied to the matching outgoing message ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"a56108fe-ca50-4a38-89de-d4761bd3066e","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=1 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+status update is applied to the matching outgoing message ... ok (639µs)
+failed status carries the reason from Meta ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"cf499541-fe30-4e4b-8577-5e3559d25941","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=1 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+failed status carries the reason from Meta ... ok (802µs)
+unknown status for unknown message is ignored, not an error ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"286eb235-86dd-49d3-bfe0-40b99522adf4","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=2 quarantined=0
+----- post-test output end -----
+unknown status for unknown message is ignored, not an error ... ok (504µs)
+events for a phone number id that has no connection are QUARANTINED, not dropped, and recorded ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"8e31ed25-b404-4442-9d2b-5d1189527a27","outcome":"quarantined","reason":"unknown_phone_number_id","phone_number_id":"PHONE1","connection_id":null,"field":"messages"}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=1
+----- post-test output end -----
+events for a phone number id that has no connection are QUARANTINED, not dropped, and recorded ... ok (2ms)
+message types we do not render are recorded as 'other' ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"88703d1e-04d8-4f49-9c7e-8e336c007c49","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=4 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+message types we do not render are recorded as 'other' ... ok (917µs)
+malformed payloads never crash: invalid JSON is 400, odd shapes are ignored ...
+------- post-test output -------
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+{"evt":"webhook.route","event_id":"05e83875-0b1a-4696-b20d-585a2b341447","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=1 quarantined=0
+----- post-test output end -----
+malformed payloads never crash: invalid JSON is 400, odd shapes are ignored ... ok (1ms)
+database failure returns 500 so Meta retries ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"b153e2f3-1670-4a30-9789-a46de047a10d","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook failed: db down
+----- post-test output end -----
+database failure returns 500 so Meta retries ... ok (1ms)
+other HTTP methods are rejected ... ok (208µs)
+voice note: stored as audio with the voice flag and an Opus content type ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"1c4abd57-c1ec-4c47-889b-8f6ec9500210","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+voice note: stored as audio with the voice flag and an Opus content type ... ok (1ms)
+video with caption and sticker are stored with their files ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"df38de99-267e-4be9-8a3a-c92905a9fcf6","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=2 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+video with caption and sticker are stored with their files ... ok (936µs)
+a file type that does not fit its message type is refused (PDF sent as image) ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"c1cba21e-b66e-420f-a5b4-354c1b01e5eb","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+a file type that does not fit its message type is refused (PDF sent as image) ... ok (872µs)
+office documents are stored ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"e5d140e2-5ae4-400f-bf61-4ed8d2c79302","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+office documents are stored ... ok (730µs)
+expired token while downloading media gives a clear reason ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"c79fc963-55ae-4867-8948-f1822383988f","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: media for message f4c6f8e1-c02a-4078-b40a-8386a9574601 failed: File could not be downloaded: the WhatsApp access token is invalid or expired
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+expired token while downloading media gives a clear reason ... ok (717µs)
+location message keeps coordinates, name and address ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"49f82629-6c58-4fe9-807a-0f2a3876b983","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=2 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+location message keeps coordinates, name and address ... ok (696µs)
+contacts message keeps names and phone numbers ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"b2fed34f-a5d8-43a9-ba34-a3d3036ea26b","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+contacts message keeps names and phone numbers ... ok (734µs)
+interactive replies and template buttons are stored with their label ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"673679f0-a4a6-4eaa-b00a-c54497b3f88d","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=3 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+interactive replies and template buttons are stored with their label ... ok (641µs)
+reply (quote) keeps the id of the quoted message; forwarded flag is kept ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"b0aa37f3-7b1b-40f3-a518-cc5b062de358","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=2 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+reply (quote) keeps the id of the quoted message; forwarded flag is kept ... ok (615µs)
+reaction decorates the target message and creates no message; removal clears it ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"427af0db-5397-42f3-8120-903bc76c2d44","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=1 ignored=0 quarantined=0
+{"evt":"webhook.route","event_id":"2ff1744a-66b8-42a2-9569-ba84777dcad3","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=1 ignored=0 quarantined=0
+{"evt":"webhook.route","event_id":"891650e5-7997-49a9-9afd-bd83aa386687","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=1 quarantined=0
+----- post-test output end -----
+reaction decorates the target message and creates no message; removal clears it ... ok (1ms)
+played status (voice message listened to) is applied ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"8c19a067-9104-49f2-9c16-1f7b4fa9d00f","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=1 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+played status (voice message listened to) is applied ... ok (690µs)
+customer without a visible phone number is stored by business-scoped user id ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"de835039-2031-4aa7-ab47-a514bf7a907e","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+customer without a visible phone number is stored by business-scoped user id ... ok (654µs)
+phone number and user id together: both are kept ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"bc0c78ec-57c4-44e1-9006-1cbbf3728e35","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+phone number and user id together: both are kept ... ok (637µs)
+routing: each phone number id stores into its own connection ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"b42fe767-7f04-45a8-8a5b-28b8c1985af9","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+{"evt":"webhook.route","event_id":"0ab6e7d8-85ac-4687-a6f9-0af287d12b7e","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000002","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+routing: each phone number id stores into its own connection ... ok (1ms)
+routing: a WABA id that does not match the connection is refused (mismatch) ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"9f521a59-7ff5-4c9b-b772-72d42a0bd2c0","outcome":"quarantined","reason":"waba_mismatch","phone_number_id":"PHONE1","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages"}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=1
+----- post-test output end -----
+routing: a WABA id that does not match the connection is refused (mismatch) ... ok (665µs)
+routing: a disconnected, revoked or suspended connection stores nothing for now but KEEPS the event in quarantine ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"3bb300bf-aa8a-4ec4-a086-66015ffd616a","outcome":"quarantined","reason":"connection_inactive","phone_number_id":"PHONE1","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages"}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=1
+{"evt":"webhook.route","event_id":"4d7fefbc-def2-4909-9dca-bd10778de658","outcome":"quarantined","reason":"connection_inactive","phone_number_id":"PHONE1","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages"}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=1
+{"evt":"webhook.route","event_id":"67bcaeec-6f3a-437c-96cd-c098a0fae756","outcome":"quarantined","reason":"tenant_suspended","phone_number_id":"PHONE1","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages"}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=1
+----- post-test output end -----
+routing: a disconnected, revoked or suspended connection stores nothing for now but KEEPS the event in quarantine ... ok (2ms)
+routing: a change set without phone_number_id is recorded as unrouted ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"096f6868-4b29-46d7-8688-9253b2858e6b","outcome":"quarantined","reason":"no_phone_number_id","phone_number_id":null,"connection_id":null,"field":"messages"}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=1
+----- post-test output end -----
+routing: a change set without phone_number_id is recorded as unrouted ... ok (1ms)
+routing: a status or reaction from another connection cannot touch this connection's message ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"fe88f5f7-9b23-4f4a-8d6a-d9382abbd00c","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000002","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=1 quarantined=0
+{"evt":"webhook.route","event_id":"0e738a49-e53e-4626-bf7d-295e7d0179fe","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=1 reactions=0 ignored=0 quarantined=0
+{"evt":"webhook.route","event_id":"9d650248-1045-46b3-9973-d4046ade6656","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+{"evt":"webhook.route","event_id":"7ab2ea3e-775c-4396-bef8-38a964170efb","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000002","field":"messages","replay":false}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=1 quarantined=0
+----- post-test output end -----
+routing: a status or reaction from another connection cannot touch this connection's message ... ok (2ms)
+routing: media is downloaded with the token of the connection that received it ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"e8d303b3-4d85-408e-b6ba-6363d5162c8d","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000002","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+routing: media is downloaded with the token of the connection that received it ... ok (1ms)
+routing: a connection without a token keeps the message and records why the file is missing ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"93e4ca8d-ac09-4d22-874d-ae9e36897a11","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+whatsapp-webhook: media for message 53bdfcb6-59bf-4eb8-82bd-5f73d68d0c72 failed: File could not be downloaded: WhatsApp is not configured for this account
+----- post-test output end -----
+routing: a connection without a token keeps the message and records why the file is missing ... ok (783µs)
+routing: the legacy test number binds to its phone number id on its first webhook, only once ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"af03d90f-c92e-4828-adea-d621146b7096","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+{"evt":"webhook.route","event_id":"91f9404d-6613-4a56-a50c-385ad6dacdad","outcome":"quarantined","reason":"unknown_phone_number_id","phone_number_id":"SOMEONE_ELSE","connection_id":null,"field":"messages"}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=1
+----- post-test output end -----
+routing: the legacy test number binds to its phone number id on its first webhook, only once ... ok (1ms)
+routing: a failure of the routing ledger never fails the webhook ...
+------- post-test output -------
+whatsapp-webhook: could not record the routing outcome: ledger down
+{"evt":"webhook.route","event_id":"405358b1-9ea0-46d0-bc4a-96156a9bf3a9","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000001","field":"messages","replay":false}
+whatsapp-webhook: stored=1 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=0
+----- post-test output end -----
+routing: a failure of the routing ledger never fails the webhook ... ok (1ms)
+quarantine failure answers 500 so Meta retries (the event is not lost) ...
+------- post-test output -------
+whatsapp-webhook failed: quarantine is full
+----- post-test output end -----
+quarantine failure answers 500 so Meta retries (the event is not lost) ... ok (697µs)
+replay: quarantined events of a number are stored once the connection exists, then the payload is erased ...
+------- post-test output -------
+{"evt":"webhook.route","event_id":"27ab75c4-4357-49a8-8797-7516515ad859","outcome":"quarantined","reason":"unknown_phone_number_id","phone_number_id":"NEWNUM","connection_id":null,"field":"messages"}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=1
+{"evt":"webhook.route","event_id":"045ec1b4-1e7b-4371-b1d3-03e710027f95","outcome":"quarantined","reason":"unknown_phone_number_id","phone_number_id":"NEWNUM","connection_id":null,"field":"messages"}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=1
+{"evt":"webhook.route","event_id":"f4873fbd-6730-4c32-a625-e24316e31b3a","outcome":"quarantined","reason":"unknown_phone_number_id","phone_number_id":"OTHERNUM","connection_id":null,"field":"messages"}
+whatsapp-webhook: stored=0 duplicates=0 statuses=0 reactions=0 ignored=0 quarantined=1
+{"evt":"webhook.route","event_id":"27ab75c4-4357-49a8-8797-7516515ad859","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000002","field":"messages","replay":true}
+{"evt":"webhook.route","event_id":"045ec1b4-1e7b-4371-b1d3-03e710027f95","outcome":"routed","connection_id":"c0000000-0000-4000-8000-000000000002","field":"messages","replay":true}
+----- post-test output end -----
+replay: quarantined events of a number are stored once the connection exists, then the payload is erased ... ok (2ms)
+logging: routing logs carry ids and reasons but never message text or customer numbers ... ok (859µs)
+
+ok | 148 passed | 0 failed (1s)
+

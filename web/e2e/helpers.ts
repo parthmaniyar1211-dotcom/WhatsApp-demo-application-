@@ -13,6 +13,7 @@ import {
 } from "../../scripts/lib/meta.mjs";
 
 export const env = {
+  staffId: process.env.E2E_STAFF_ID ?? "ADMIN1",
   password: process.env.E2E_PASSWORD ?? "",
   appSecret: process.env.WA_APP_SECRET ?? "",
 };
@@ -117,6 +118,7 @@ export async function latestOutgoing(waId: string) {
 
 export async function login(page: Page, password: string = env.password) {
   await page.goto("/");
+  await page.getByLabel("Staff ID").fill(env.staffId);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByTestId("settings-button")).toBeVisible();

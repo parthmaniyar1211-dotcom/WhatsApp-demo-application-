@@ -1,0 +1,17 @@
+# Static checks, 2026-11-16T19:46:35Z
+## deno check (all five functions + wa-diagnose)
+Check supabase/functions/whatsapp-webhook/index.ts
+Check supabase/functions/send-whatsapp/index.ts
+Check supabase/functions/admin-staff/index.ts
+Check supabase/functions/admin-connections/index.ts
+Check supabase/functions/mark-read/index.ts
+Check supabase/functions/wa-diagnose/index.ts
+exit=0
+## deno lint
+Checked 29 files
+## whatsapp_setup.sql sync
+OK  whatsapp_setup.sql matches the 8 migration(s).
+## web tsc
+tsc: no errors
+## web eslint
+eslint: no problems

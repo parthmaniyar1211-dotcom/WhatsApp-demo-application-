@@ -1,0 +1,7 @@
+# scripts/probe-temp-password-local.mjs (review finding F1 and F6), 2026-11-16T19:48:52Z
+session flag must_change_password: true
+F1.1 temporary-password session calls the data API -> HTTP 200 (ALLOWED: the rule is not enforced server-side)
+F1.2 client clears its own flag without changing the password -> HTTP 200 (ALLOWED: flag is user-writable)
+F1.3 client writes app_metadata (server-only) -> HTTP 403 "Updating app_metadata requires admin privileges"
+F6   start_conversation with no connection -> HTTP 500 {"code":"P0002","message":"No WhatsApp number is connected to this account. Ask your administrator."}
+cleaned up

@@ -1,0 +1,107 @@
+# scripts/verify-multi-tenant-local.mjs against the LOCAL stack, 2026-11-16T19:47:59Z
+Target: 127.0.0.1:54321 (local)
+
+PASS  platform admin can sign in
+PASS  admin creates client A with a generated Staff ID and one-time temporary password
+PASS  admin creates client B
+PASS  the two clients are different tenants
+PASS  client A signs in with the temporary password
+PASS  first login is flagged: password change required
+PASS  client B signs in
+PASS  a client cannot call the admin functions
+PASS  unauthenticated calls to the admin functions are refused
+PASS  admin creates a connection for each client
+PASS  the same phone number id cannot be attached to a second client
+PASS  tokens are stored (Vault) and never echoed
+PASS  the service role (Edge Functions) can decrypt each connection's own token
+PASS  clients cannot decrypt tokens (RPC refused)
+PASS  admin cannot decrypt tokens either
+PASS  clients cannot read the Vault reference column (nor select *)
+PASS  client A sees only its own connection, as connected
+PASS  the token text is nowhere in what clients can read
+PASS  both clients can add the same customer number (separate chats)
+PASS  webhook with a wrong signature is rejected
+PASS  webhooks are routed by phone number id: each is stored once
+PASS  an unknown phone number id is acknowledged and stores nothing
+PASS  a WABA id that does not match the connection is refused
+PASS  replaying A's message id on B's number does not copy or change it
+PASS  A reads only A's message, B only B's
+PASS  attack: read B's conversation by id
+PASS  attack: read B's messages by conversation id
+PASS  attack: read B's messages by tenant id
+PASS  attack: list all conversations: only own tenant
+PASS  attack: PATCH B's conversation is refused
+PASS  attack: DELETE B's conversation is refused
+PASS  attack: INSERT a conversation straight into B's tenant is refused
+PASS  attack: INSERT a message straight into A's tenant is refused
+PASS  attack: mark_conversation_read on B's chat is refused
+PASS  attack: rename_contact on B's chat changes nothing
+PASS  attack: B's contact name is untouched
+PASS  attack: delete_message_for_me on B's message is refused
+PASS  attack: set_message_flags (star) on B's message is refused
+PASS  attack: search cannot find B's text
+PASS  attack: search finds A's own text
+PASS  attack: B's staff row is invisible to A
+PASS  attack: other tenants are invisible
+PASS  attack: memberships of other tenants are invisible
+PASS  attack: audit log is invisible to a client
+PASS  attack: webhook ledger is invisible to a client
+PASS  attack: admin report RPCs are refused
+PASS  attack: service-only RPCs are refused
+PASS  attack: a forged tenant_id in start_conversation is ignored (tenant comes from the login)
+PASS  attack: anonymous (anon key only) reads nothing
+PASS  A can send in its own chat (dry run)
+PASS  B cannot send into A's chat (404, nothing stored)
+PASS  B cannot send a template into A's chat
+PASS  B cannot mark A's chat read
+PASS  A's chat holds A's incoming message and A's reply, nothing from B
+PASS  an incoming photo is stored for A (dry run sample)
+PASS  the file path was recorded
+PASS  A can sign a URL for its own incoming file
+PASS  B cannot sign a URL for A's file
+PASS  an anonymous caller cannot sign a URL
+PASS  B cannot download A's file directly
+PASS  A can upload into its own outgoing folder
+PASS  B cannot upload into A's outgoing folder
+PASS  B cannot sign A's pending upload
+PASS  the live message was stored
+PASS  Realtime delivers A's new message to A
+PASS  Realtime delivers NOTHING at all (not even an empty event) to the other tenant
+PASS  Realtime delivers B's message to B and not to A
+PASS  admin overview returns counts
+PASS  admin tenant summary shows per-client counts only
+PASS  admin can list connections of all clients
+PASS  admin does NOT read the message content of clients
+PASS  admin disconnects A's number
+PASS  a disconnected number's webhook is acknowledged but stores nothing
+PASS  its token was deleted from Vault
+PASS  B's token is untouched
+PASS  the routing ledger recorded the refused event (admin only)
+PASS  reconnect + new token works (rotation)
+PASS  the number receives messages again
+PASS  Embedded Signup is behind its feature flag (refused)
+PASS  suspended tenant B reads nothing immediately
+PASS  suspended tenant B cannot send
+PASS  and its webhook is acknowledged but stores nothing
+PASS  reactivated tenant B reads again
+PASS  admin disables client A
+PASS  A's still-valid token now reads nothing
+PASS  A can no longer send (refused: 401 banned session or 403 disabled)
+PASS  A cannot sign in again
+PASS  admin resets A's password: new temporary password, old one stops working
+PASS  A signs in with the new temporary password
+PASS  audit log has staff.create
+PASS  audit log has connection.create
+PASS  audit log has connection.token_set
+PASS  audit log has connection.disconnect
+PASS  audit log has connection.reconnect
+PASS  audit log has tenant.set_status
+PASS  audit log has staff.disable
+PASS  audit log has staff.enable
+PASS  audit log has staff.reset_password
+PASS  audit log contains no password or token
+PASS  clients still cannot change audit rows
+
+Cleanup: test clients, connections, chats and logins removed.
+
+100 passed, 0 failed

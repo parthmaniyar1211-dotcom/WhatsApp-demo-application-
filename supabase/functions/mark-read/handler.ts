@@ -15,18 +15,20 @@
 import { bearerToken, corsHeaders, HttpError, json, logError, parseJsonObject, readBody } from "../_shared/http.ts";
 import { fetchWithRetry, type FetchFn, graphUrl, type SleepFn } from "../_shared/graph.ts";
 import { staffMessage } from "../_shared/wa_errors.ts";
+import { type ConnectionStore } from "../_shared/connections.ts";
 
 export interface MarkReadEnv {
-  token?: string;
-  phoneId?: string;
+  // Token and phone number id come from the conversation's own connection (MarkReadStore.getCredentials).
   graphVersion: string;
   dryRun: boolean;
 }
 
-export interface MarkReadStore {
+export interface MarkReadStore extends ConnectionStore {
   getUserId(jwt: string): Promise<string | null>;
-  getStaff(userId: string): Promise<{ disabled: boolean } | null>;
-  getConversation(id: string): Promise<{ id: string; meta_read_wa_message_id: string | null } | null>;
+  getStaff(userId: string): Promise<{ disabled: boolean; tenant_id: string | null } | null>;
+  getConversation(
+    id: string,
+  ): Promise<{ id: string; tenant_id: string; connection_id: string; meta_read_wa_message_id: string | null } | null>;
   /** The newest incoming message of the conversation. */
   getLatestIncoming(conversationId: string): Promise<{ wa_message_id: string | null; created_at: string } | null>;
   /** Remembers which message was last marked as read at Meta. */
@@ -66,7 +68,9 @@ async function markRead(req: Request, deps: MarkReadDeps): Promise<Record<string
   const userId = jwt ? await store.getUserId(jwt) : null;
   if (!userId) throw new HttpError(401, "Not signed in", "unauthenticated");
   const staff = await store.getStaff(userId);
-  if (!staff || staff.disabled) throw new HttpError(403, "This account is not allowed to do this", "forbidden");
+  if (!staff || staff.disabled || !staff.tenant_id) {
+    throw new HttpError(403, "This account is not allowed to do this", "forbidden");
+  }
 
   const input = parseJsonObject(await readBody(req, 4096));
   if (typeof input.conversation_id !== "string" || !UUID.test(input.conversation_id)) {
@@ -75,7 +79,9 @@ async function markRead(req: Request, deps: MarkReadDeps): Promise<Record<string
   const typing = input.typing === true;
 
   const conversation = await store.getConversation(input.conversation_id);
-  if (!conversation) throw new HttpError(404, "Conversation not found", "not_found");
+  if (!conversation || conversation.tenant_id !== staff.tenant_id) {
+    throw new HttpError(404, "Conversation not found", "not_found");
+  }
 
   const latest = await store.getLatestIncoming(conversation.id);
   if (!latest?.wa_message_id) return { ok: true, marked: false, reason: "no incoming message" };
@@ -88,13 +94,18 @@ async function markRead(req: Request, deps: MarkReadDeps): Promise<Record<string
   }
 
   if (!env.dryRun) {
-    if (!env.token || !env.phoneId) return { ok: true, marked: false, reason: "WhatsApp is not configured on the server" };
+    // Best effort: a connection that cannot be used must not stop staff from reading the chat.
+    const lookup = await store.getCredentials(conversation.connection_id);
+    if (!lookup.ok) {
+      return { ok: true, marked: false, reason: lookup.reason === "inactive" ? "This WhatsApp number is disconnected" : "WhatsApp is not configured for this account" };
+    }
+    const creds = lookup.credentials;
     try {
       const response = await fetchWithRetry(
-        graphUrl(env.graphVersion, `${env.phoneId}/messages`),
+        graphUrl(env.graphVersion, `${creds.phoneId}/messages`),
         {
           method: "POST",
-          headers: { Authorization: `Bearer ${env.token}`, "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${creds.token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             messaging_product: "whatsapp",
             status: "read",

@@ -1,7 +1,10 @@
 import { createMarkReadHandler, type MarkReadEnv, type MarkReadStore } from "../mark-read/handler.ts";
+import type { CredentialLookup } from "../_shared/connections.ts";
 import { assertEquals, fakeFetch, noSleep } from "./helpers.ts";
 
 const CONV = "22222222-2222-4222-8222-222222222222";
+const TENANT = "33333333-3333-4333-8333-333333333333";
+const CONN = "55555555-5555-4555-8555-555555555555";
 const NOW = Date.parse("2026-11-14T12:00:00Z");
 
 function setup(options: {
@@ -10,13 +13,25 @@ function setup(options: {
   alreadyRead?: string | null;
   latest?: { wa_message_id: string | null; created_at: string } | null;
   responses?: Array<Response | Error>;
+  tenant?: string | null;
+  conversationTenant?: string;
+  credentials?: CredentialLookup;
 } = {}) {
   const saved: string[] = [];
   const store: MarkReadStore = {
     getUserId: (jwt) => Promise.resolve(jwt === "good-jwt" ? "user-1" : null),
-    getStaff: () => Promise.resolve({ disabled: options.disabled ?? false }),
+    getStaff: () => Promise.resolve({ disabled: options.disabled ?? false, tenant_id: options.tenant === undefined ? TENANT : options.tenant }),
+    getCredentials: (connectionId) =>
+      Promise.resolve(
+        options.credentials ??
+          { ok: true as const, credentials: { connectionId, tenantId: TENANT, phoneId: "PHONE1", token: "graph-token" } },
+      ),
     getConversation: (id) =>
-      Promise.resolve(id === CONV ? { id, meta_read_wa_message_id: options.alreadyRead ?? null } : null),
+      Promise.resolve(
+        id === CONV
+          ? { id, tenant_id: options.conversationTenant ?? TENANT, connection_id: CONN, meta_read_wa_message_id: options.alreadyRead ?? null }
+          : null,
+      ),
     getLatestIncoming: () =>
       Promise.resolve(
         options.latest === undefined
@@ -30,7 +45,7 @@ function setup(options: {
   };
   const { fetchFn, calls } = fakeFetch(options.responses ?? []);
   const handler = createMarkReadHandler({
-    env: { token: "graph-token", phoneId: "PHONE1", graphVersion: "v26.0", dryRun: false, ...options.env },
+    env: { graphVersion: "v26.0", dryRun: false, ...options.env },
     store,
     fetchFn,
     sleep: noSleep,
@@ -79,7 +94,7 @@ Deno.test("mark-read: nothing is sent when already marked, when there is no mess
 });
 
 Deno.test("mark-read: dry run records the read without calling Meta", async () => {
-  const { call, calls, saved } = setup({ env: { dryRun: true, token: undefined } });
+  const { call, calls, saved } = setup({ env: { dryRun: true } });
   const res = await call({ conversation_id: CONV });
   assertEquals((await res.json()).dry_run, true);
   assertEquals(calls.length, 0);
@@ -113,4 +128,42 @@ Deno.test("mark-read: auth and input checks", async () => {
   const refused = await disabled.call({ conversation_id: CONV });
   assertEquals(refused.status, 403);
   await refused.body?.cancel();
+});
+
+Deno.test("mark-read: another tenant's conversation is 'not found' and Meta is not called", async () => {
+  const { call, calls, saved } = setup({ conversationTenant: "99999999-9999-4999-8999-999999999999" });
+  const res = await call({ conversation_id: CONV });
+  assertEquals(res.status, 404);
+  await res.body?.cancel();
+  assertEquals(calls.length, 0);
+  assertEquals(saved, []);
+});
+
+Deno.test("mark-read: a login without an active tenant is 403", async () => {
+  const { call, calls } = setup({ tenant: null });
+  const res = await call({ conversation_id: CONV });
+  assertEquals(res.status, 403);
+  await res.body?.cancel();
+  assertEquals(calls.length, 0);
+});
+
+Deno.test("mark-read: uses the connection's own credentials", async () => {
+  const { call, calls } = setup({
+    responses: [Response.json({ success: true })],
+    credentials: { ok: true, credentials: { connectionId: CONN, tenantId: TENANT, phoneId: "TENANT_PHONE_9", token: "tenant-token-9" } },
+  });
+  const res = await call({ conversation_id: CONV });
+  assertEquals((await res.json()).marked, true);
+  assertEquals(calls[0].url, "https://graph.facebook.com/v26.0/TENANT_PHONE_9/messages");
+  assertEquals((calls[0].init?.headers as Record<string, string>).Authorization, "Bearer tenant-token-9");
+});
+
+Deno.test("mark-read: a disconnected number never blocks reading (reported, not an error)", async () => {
+  const { call, calls, saved } = setup({ credentials: { ok: false, reason: "inactive" } });
+  const res = await call({ conversation_id: CONV });
+  assertEquals(res.status, 200);
+  const data = await res.json();
+  assertEquals(data.marked, false);
+  assertEquals(calls.length, 0);
+  assertEquals(saved, []);
 });

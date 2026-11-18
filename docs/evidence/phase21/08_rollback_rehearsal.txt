@@ -1,0 +1,40 @@
+
+=== 0. local only: 127.0.0.1:54322 database postgres
+PASS  target is local
+
+=== 1. Phase 2.1 state (forward)
+(local only: removed 0 quarantined test events left by earlier test runs; the rollback guard would otherwise correctly refuse)
+PASS  Phase 2.1 schema present
+NOTE  the local test data grew since the baseline was taken (test runs add chats); the proof below compares before/after on the SAME state instead
+
+=== 2. GUARD 1: a pending quarantined event blocks the rollback and nothing changes
+PASS  refused: Rollback refused: quarantined webhook events are still waiting
+PASS  schema untouched after the refusal
+PASS  quarantined event still there
+
+=== 3. GUARD 2: a login with a temporary password blocks the rollback and nothing changes
+PASS  refused: Rollback refused: some logins still have a temporary password and would become fully usable
+PASS  schema untouched after the refusal
+
+=== 4. ROLLBACK
+PASS  rollback ran
+PASS  schema signature IDENTICAL to the Phase 2 baseline (521 lines compared)
+PASS  data fingerprint IDENTICAL before and after the rollback
+PASS  must_change_password column removed
+PASS  webhook_quarantine removed
+PASS  Phase 2 tenant suite on rolled-back schema: 92 PASS, 0 FAIL
+PASS  delete-for-me suite on rolled-back schema: 25 PASS, 0 FAIL
+
+=== 5. IDEMPOTENT: running the rollback again changes nothing
+PASS  second rollback ran
+PASS  signature unchanged
+
+=== 6. ROLL FORWARD: apply both Phase 2.1 migrations again
+PASS  applied 20261119000000_password_change_enforcement.sql
+PASS  applied 20261119000100_webhook_quarantine.sql
+PASS  schema signature IDENTICAL to the Phase 2.1 state before the rollback
+PASS  data fingerprint identical after the roll-forward
+PASS  Phase 2.1 suite after roll-forward: 38 PASS, 0 FAIL
+PASS  Phase 2 suite after roll-forward: 92 PASS, 0 FAIL
+
+ROLLBACK REHEARSAL: ALL CHECKS PASSED

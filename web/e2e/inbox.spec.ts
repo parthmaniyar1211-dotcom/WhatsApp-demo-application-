@@ -8,6 +8,7 @@
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import {
+  env,
   conversationItem,
   closeSettings,
   openSettings,
@@ -203,7 +204,8 @@ test("offline banner, and messages that arrived while offline show up after reco
 
 test("wrong password is rejected with a clear message", async ({ page }) => {
   await page.goto("/");
+  await page.getByLabel("Staff ID").fill(env.staffId);
   await page.getByLabel("Password").fill("definitely-wrong-password");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("alert")).toContainText("Wrong password");
+  await expect(page.getByRole("alert")).toContainText("Wrong Staff ID or password");
 });

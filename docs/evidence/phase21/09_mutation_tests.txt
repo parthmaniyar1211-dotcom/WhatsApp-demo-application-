@@ -1,0 +1,8 @@
+M1 SQL: current_tenant_ids() ignores must_change_password -> phase21 suite FAIL count=6
+restored: suite FAIL count=0
+M2 SQL: is_admin() ignores must_change_password -> FAIL count=2
+M3 unlock accepts the temporary password again -> FAILED | 146 passed | 2 failed (1s)
+M4 unlock accepts a stale session -> FAILED | 147 passed | 1 failed (1s)
+M5 admin-staff serves a locked admin -> FAILED | 147 passed | 1 failed (1s)
+M6 webhook-replay serves a locked admin -> FAILED | 147 passed | 1 failed (1s)
+M7 webhook silently drops unroutable events (quarantine write removed) -> FAILED | 144 passed | 4 failed
